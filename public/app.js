@@ -169,6 +169,7 @@ async function mergePull(pr) {
       }
     }
     merges.delete(pr.id); render();
+    markViewed({ id: pr.id, updatedAt: data.updatedAt });
     $('summary').append(document.createTextNode(` · Merged ${pr.repo} #${pr.number}`));
   } catch (error) {
     change.saving = false;
@@ -192,6 +193,7 @@ async function changeDraftStatus(pr) {
     const current = items.find(item => item.id === pr.id);
     if (current) { current.status = data.status; current.updatedAt = data.updatedAt; current.review = data.review; current.canMerge = false; current.mergePending = !toDraft; }
     draftChanges.delete(pr.id); render();
+    markViewed({ id: pr.id, updatedAt: data.updatedAt });
     scheduleMergeReadiness();
     $('summary').append(document.createTextNode(toDraft ? ' · PR converted to draft' : ' · PR ready for review'));
   } catch (error) {
@@ -248,6 +250,7 @@ function titleEditor(pr) {
       const current = items.find(item => item.id === pr.id);
       if (current) { current.title = data.title; current.updatedAt = data.updatedAt; }
       titleEdits.delete(pr.id); render();
+      markViewed({ id: pr.id, updatedAt: data.updatedAt });
       $('summary').append(document.createTextNode(' · Title updated'));
       focusTitleControl(pr.id, '.edit-title');
     } catch (error) {
