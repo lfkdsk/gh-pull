@@ -10,8 +10,16 @@ const assets = new Map([
   ['/', ['index.html', 'text/html']],
   ['/app.js', ['app.js', 'text/javascript']],
   ['/model.js', ['model.js', 'text/javascript']],
+  ['/ui.js', ['ui.js', 'text/javascript']],
   ['/style.css', ['style.css', 'text/css']],
   ['/favicon.svg', ['favicon.svg', 'image/svg+xml']],
+]);
+
+const mutations = new Map([
+  ['/api/pulls/title', { method: 'updateTitle', validate: validateTitleUpdate, unavailable: 'Title editing is unavailable.' }],
+  ['/api/pulls/draft', { method: 'convertToDraft', validate: validateDraftUpdate, unavailable: 'Status changes are unavailable.' }],
+  ['/api/pulls/ready', { method: 'markReadyForReview', validate: validateDraftUpdate, unavailable: 'Status changes are unavailable.' }],
+  ['/api/pulls/merge', { method: 'merge', validate: validateMerge, unavailable: 'Status changes are unavailable.' }],
 ]);
 
 export function createApp({ list = createGitHub(), updateTitle = list.updateTitle, convertToDraft = list.convertToDraft, markReadyForReview = list.markReadyForReview, merge = list.merge, config = { mode: 'local' }, authOptions, deploymentEnv = process.env } = {}) {
@@ -55,7 +63,8 @@ export function createApp({ list = createGitHub(), updateTitle = list.updateTitl
       if (auth && url.pathname.startsWith('/api/') && !session) throw new ApiError('Please sign in with GitHub.', 401);
       const activeList = session ? session.list : list;
       const cache = session ? session.cache : localCache;
-      if (req.method === 'PATCH' && ['/api/pulls/title', '/api/pulls/draft', '/api/pulls/ready', '/api/pulls/merge'].includes(url.pathname)) {
+      const mutation = mutations.get(url.pathname);
+      if (req.method === 'PATCH' && mutation) {
         if (req.headers.origin !== origin) return send(403, { error: 'Same-origin requests only.' });
         if (req.headers['content-type']?.split(';')[0].trim() !== 'application/json') return send(415, { error: 'Expected application/json.' });
         const chunks = [];
@@ -67,11 +76,10 @@ export function createApp({ list = createGitHub(), updateTitle = list.updateTitl
         }
         let input;
         try { input = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { throw new ApiError('Invalid JSON body.', 400); }
-        const statusChange = url.pathname !== '/api/pulls/title';
-        input = url.pathname === '/api/pulls/merge' ? validateMerge(input) : statusChange ? validateDraftUpdate(input) : validateTitleUpdate(input);
+        input = mutation.validate(input);
         const actions = session ? session.list : { merge, convertToDraft, markReadyForReview, updateTitle };
-        const mutate = url.pathname === '/api/pulls/merge' ? actions.merge : url.pathname === '/api/pulls/draft' ? actions.convertToDraft : url.pathname === '/api/pulls/ready' ? actions.markReadyForReview : actions.updateTitle;
-        if (!mutate) throw new ApiError(statusChange ? 'Status changes are unavailable.' : 'Title editing is unavailable.', 503);
+        const mutate = actions[mutation.method];
+        if (!mutate) throw new ApiError(mutation.unavailable, 503);
         const result = await mutate(input);
         cache.clear();
         return send(200, result);

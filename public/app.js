@@ -1,3 +1,4 @@
+import { element, icon, clipboardFeedback } from './ui.js';
 import { assignNameColors, NAME_COLOR_COUNT, groupPulls, labels, relativeTime, normalizeViewedUpdates, hasUnviewedUpdate } from './model.js';
 
 const $ = id => document.getElementById(id);
@@ -114,13 +115,6 @@ window.addEventListener('storage', event => {
   }
 });
 
-function element(tag, text, className) {
-  const node = document.createElement(tag);
-  if (text !== undefined) node.textContent = text;
-  if (className) node.className = className;
-  return node;
-}
-
 function badge(text, kind) { return element('span', text, `badge ${kind.toLowerCase()}`); }
 
 function usernameLink(username, className = '') {
@@ -147,60 +141,65 @@ function repositoryLink(repo) {
   return link;
 }
 
-async function mergePull(pr) {
-  if (authMode === 'github-app' && !pr.mergeAccess?.allowed) return;
-  if (merges.get(pr.id)?.saving) return;
-  const change = { saving: true, error: '' };
-  merges.set(pr.id, change); render();
+const changeMessages = {
+  title: { failure: 'Could not update the title. Please retry.', timeout: 'The save timed out. Retry to check and save the title.' },
+  status: { failure: 'Could not change the PR status. Please retry.', timeout: 'Status change timed out. Click the status badge to retry or refresh to check its status.' },
+  merge: { failure: 'Merge failed. Refresh to check its status.', timeout: 'Merge timed out. Refresh to check whether GitHub merged it.' },
+};
+
+// All mutations share pending/error handling and mark only the confirmed version
+// as read. Action callbacks handle the few differences in visible state and focus.
+async function changePull(pr, changes, { action, input = {}, apply, message, onSuccess, onError }) {
+  const change = changes.get(pr.id) ?? {};
+  if (change.saving) return;
+  change.saving = true; change.error = '';
+  changes.set(pr.id, change); render();
+  const messages = changeMessages[action] ?? changeMessages.status;
   try {
-    const response = await apiFetch('/api/pulls/merge', {
+    const response = await apiFetch(`/api/pulls/${action}`, {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: pr.id, headOid: pr.headOid, mergeMethod: pr.mergeMethod }),
-      signal: AbortSignal.timeout(65_000),
+      body: JSON.stringify({ id: pr.id, ...input }), signal: AbortSignal.timeout(65_000),
     });
     const data = await response.json();
-    if (!response.ok) throw new Error(data.error || 'Merge failed. Refresh to check its status.');
-    const current = items.find(item => item.id === pr.id);
-    if (current) {
+    if (!response.ok) throw new Error(data.error || messages.failure);
+    apply(items.find(item => item.id === pr.id), data);
+    changes.delete(pr.id); render();
+    markViewed({ id: pr.id, updatedAt: data.updatedAt });
+    $('summary').append(document.createTextNode(` · ${message}`));
+    onSuccess?.();
+  } catch (error) {
+    change.saving = false;
+    change.error = error.name === 'TimeoutError' ? messages.timeout : error.message;
+    render(); onError?.();
+  }
+}
+
+async function mergePull(pr) {
+  if (authMode === 'github-app' && !pr.mergeAccess?.allowed) return;
+  await changePull(pr, merges, {
+    action: 'merge', input: { headOid: pr.headOid, mergeMethod: pr.mergeMethod },
+    message: `Merged ${pr.repo} #${pr.number}`,
+    apply(current, data) {
+      if (!current) return;
       Object.assign(current, data);
       if ($('state').value === 'open') {
         items = items.filter(item => item.id !== pr.id);
         total = Math.max(0, total - 1);
       }
-    }
-    merges.delete(pr.id); render();
-    markViewed({ id: pr.id, updatedAt: data.updatedAt });
-    $('summary').append(document.createTextNode(` · Merged ${pr.repo} #${pr.number}`));
-  } catch (error) {
-    change.saving = false;
-    change.error = error.name === 'TimeoutError' ? 'Merge timed out. Refresh to check whether GitHub merged it.' : error.message;
-    render();
-  }
+    },
+  });
 }
 
 async function changeDraftStatus(pr) {
-  if (draftChanges.get(pr.id)?.saving) return;
   const toDraft = pr.status === 'OPEN';
-  const change = { saving: true, error: '' };
-  draftChanges.set(pr.id, change); render();
-  try {
-    const response = await apiFetch(toDraft ? '/api/pulls/draft' : '/api/pulls/ready', {
-      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: pr.id }), signal: AbortSignal.timeout(65_000),
-    });
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error || 'Could not change the PR status. Please retry.');
-    const current = items.find(item => item.id === pr.id);
-    if (current) { current.status = data.status; current.updatedAt = data.updatedAt; current.review = data.review; current.canMerge = false; current.mergePending = !toDraft; }
-    draftChanges.delete(pr.id); render();
-    markViewed({ id: pr.id, updatedAt: data.updatedAt });
-    scheduleMergeReadiness();
-    $('summary').append(document.createTextNode(toDraft ? ' · PR converted to draft' : ' · PR ready for review'));
-  } catch (error) {
-    change.saving = false;
-    change.error = error.name === 'TimeoutError' ? 'Status change timed out. Click the status badge to retry or refresh to check its status.' : error.message;
-    render();
-  }
+  await changePull(pr, draftChanges, {
+    action: toDraft ? 'draft' : 'ready',
+    message: toDraft ? 'PR converted to draft' : 'PR ready for review',
+    apply(current, data) {
+      if (current) Object.assign(current, { status: data.status, updatedAt: data.updatedAt, review: data.review, canMerge: false, mergePending: !toDraft });
+    },
+    onSuccess: scheduleMergeReadiness,
+  });
 }
 
 function focusTitleControl(id, selector) {
@@ -238,26 +237,15 @@ function titleEditor(pr) {
   form.addEventListener('submit', async event => {
     event.preventDefault();
     if (draft.saving || !draft.value.trim() || draft.value.trim() === draft.expectedTitle) return;
-    draft.saving = true; draft.error = ''; render();
-    try {
-      const response = await apiFetch('/api/pulls/title', {
-        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: pr.id, title: draft.value.trim(), expectedTitle: draft.expectedTitle }),
-        signal: AbortSignal.timeout(65_000),
-      });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || 'Could not update the title. Please retry.');
-      const current = items.find(item => item.id === pr.id);
-      if (current) { current.title = data.title; current.updatedAt = data.updatedAt; }
-      titleEdits.delete(pr.id); render();
-      markViewed({ id: pr.id, updatedAt: data.updatedAt });
-      $('summary').append(document.createTextNode(' · Title updated'));
-      focusTitleControl(pr.id, '.edit-title');
-    } catch (error) {
-      draft.saving = false;
-      draft.error = error.name === 'TimeoutError' ? 'The save timed out. Retry to check and save the title.' : error.message;
-      render(); focusTitleControl(pr.id, '.title-editor input');
-    }
+    await changePull(pr, titleEdits, {
+      action: 'title', input: { title: draft.value.trim(), expectedTitle: draft.expectedTitle },
+      message: 'Title updated',
+      apply(current, data) {
+        if (current) Object.assign(current, { title: data.title, updatedAt: data.updatedAt });
+      },
+      onSuccess: () => focusTitleControl(pr.id, '.edit-title'),
+      onError: () => focusTitleControl(pr.id, '.title-editor input'),
+    });
   });
   return form;
 }
@@ -312,31 +300,8 @@ function render() {
         copy.type = 'button';
         copy.title = 'Copy PR link';
         copy.setAttribute('aria-label', `Copy link to ${pr.title}`);
-        const copyIcon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-        for (const [key, value] of Object.entries({ viewBox: '0 0 16 16', width: '16', height: '16', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.5', 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'aria-hidden': 'true', focusable: 'false' })) copyIcon.setAttribute(key, value);
-        const copyPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-        copyPath.setAttribute('d', 'M5 3V2a1 1 0 0 1 1-1h8a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1h-1 M2 5h8a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1Z');
-        copyIcon.append(copyPath);
-        copy.append(copyIcon);
-        let feedbackTimer;
-        copy.addEventListener('click', async () => {
-          clearTimeout(feedbackTimer);
-          try {
-            await navigator.clipboard.writeText(title.href);
-            copy.textContent = '✓';
-            copy.title = 'PR link copied';
-            feedback.textContent = 'PR link copied';
-          } catch {
-            copy.textContent = '!';
-            copy.title = 'Could not copy. Allow clipboard access and retry.';
-            feedback.textContent = copy.title;
-          }
-          feedbackTimer = setTimeout(() => {
-            copy.replaceChildren(copyIcon);
-            copy.title = 'Copy PR link';
-            feedback.textContent = '';
-          }, 2000);
-        });
+        copy.append(icon('copy'));
+        clipboardFeedback(copy, { text: title.href, feedback, success: 'PR link copied' });
         const actions = element('span', undefined, 'pr-links');
         actions.append(copy);
         const files = element('a', undefined, 'pr-files');
@@ -348,18 +313,7 @@ function render() {
         files.dataset.viewPr = '';
         files.title = 'View code changes (opens in a new tab)';
         files.setAttribute('aria-label', `View code changes for ${pr.title} (opens in a new tab)`);
-        // GitHub Octicons file-diff (MIT); see THIRD_PARTY_NOTICES.
-        const icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-        icon.setAttribute('viewBox', '0 0 16 16');
-        icon.setAttribute('width', '16');
-        icon.setAttribute('height', '16');
-        icon.setAttribute('fill', 'currentColor');
-        icon.setAttribute('aria-hidden', 'true');
-        icon.setAttribute('focusable', 'false');
-        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-        path.setAttribute('d', 'M1 1.75C1 .784 1.784 0 2.75 0h7.586c.464 0 .909.184 1.237.513l2.914 2.914c.329.328.513.773.513 1.237v9.586A1.75 1.75 0 0 1 13.25 16H2.75A1.75 1.75 0 0 1 1 14.25Zm1.75-.25a.25.25 0 0 0-.25.25v12.5c0 .138.112.25.25.25h10.5a.25.25 0 0 0 .25-.25V4.664a.25.25 0 0 0-.073-.177l-2.914-2.914a.25.25 0 0 0-.177-.073ZM8 3.25a.75.75 0 0 1 .75.75v1.5h1.5a.75.75 0 0 1 0 1.5h-1.5v1.5a.75.75 0 0 1-1.5 0V7h-1.5a.75.75 0 0 1 0-1.5h1.5V4A.75.75 0 0 1 8 3.25Zm-3 8a.75.75 0 0 1 .75-.75h4.5a.75.75 0 0 1 0 1.5h-4.5a.75.75 0 0 1-.75-.75Z');
-        icon.append(path);
-        files.append(icon);
+        files.append(icon('files'));
         actions.append(files);
         line.append(actions);
       }
@@ -369,11 +323,7 @@ function render() {
         edit.type = 'button'; edit.title = 'Edit PR title';
         edit.setAttribute('aria-label', `Edit title of ${pr.title}`);
         edit.disabled = Boolean(titleEdits.get(pr.id)?.saving || merges.get(pr.id)?.saving);
-        const pencil = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-        for (const [key, value] of Object.entries({ viewBox: '0 0 16 16', width: '16', height: '16', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.5', 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'aria-hidden': 'true', focusable: 'false' })) pencil.setAttribute(key, value);
-        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-        path.setAttribute('d', 'M10 3l3 3M2 11l-1 4 4-1L14 5a2.12 2.12 0 0 0-3-3Z');
-        pencil.append(path); edit.append(pencil);
+        edit.append(icon('edit'));
         edit.addEventListener('click', () => {
           if (!titleEdits.has(pr.id)) titleEdits.set(pr.id, { value: pr.title, expectedTitle: pr.title, saving: false, error: '' });
           render(); focusTitleControl(pr.id, '.title-editor input');
@@ -432,33 +382,10 @@ function render() {
         branch.type = 'button';
         branch.title = `Copy branch name: ${pr.branch}`;
         branch.setAttribute('aria-label', branch.title);
-        const icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-        for (const [key, value] of Object.entries({ viewBox: '0 0 16 16', width: '14', height: '14', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.5', 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'aria-hidden': 'true', focusable: 'false' })) icon.setAttribute(key, value);
-        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-        path.setAttribute('d', 'M5 3V2a1 1 0 0 1 1-1h8a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1h-1 M2 5h8a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1Z');
-        icon.append(path);
         const symbol = element('span', undefined, 'branch-copy-symbol');
-        symbol.setAttribute('aria-hidden', 'true'); symbol.append(icon);
+        symbol.setAttribute('aria-hidden', 'true'); symbol.append(icon('copy', 14));
         branch.append(element('span', pr.branch, 'branch-name'), symbol);
-        let timer;
-        branch.addEventListener('click', async () => {
-          clearTimeout(timer);
-          try {
-            await navigator.clipboard.writeText(pr.branch);
-            symbol.textContent = '✓';
-            branch.title = 'Branch name copied';
-            feedback.textContent = 'Branch name copied';
-          } catch {
-            symbol.textContent = '!';
-            branch.title = 'Could not copy. Allow clipboard access and retry.';
-            feedback.textContent = branch.title;
-          }
-          timer = setTimeout(() => {
-            symbol.replaceChildren(icon);
-            branch.title = `Copy branch name: ${pr.branch}`;
-            feedback.textContent = '';
-          }, 2000);
-        });
+        clipboardFeedback(branch, { text: pr.branch, symbol, feedback, success: 'Branch name copied' });
         meta.append(branch);
       }
       if (pr.review !== 'NONE') {
@@ -470,14 +397,7 @@ function render() {
       time.dateTime = pr.updatedAt;
       time.title = `Updated ${new Date(pr.updatedAt).toLocaleString()}`;
       time.setAttribute('aria-label', `Updated ${age}`);
-      const clock = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-      for (const [key, value] of Object.entries({ viewBox: '0 0 16 16', width: '14', height: '14', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.5', 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'aria-hidden': 'true', focusable: 'false' })) clock.setAttribute(key, value);
-      const face = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-      face.setAttribute('cx', '8'); face.setAttribute('cy', '8'); face.setAttribute('r', '6');
-      const hands = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-      hands.setAttribute('d', 'M8 4v4l2.5 1.5');
-      clock.append(face, hands);
-      time.append(clock, document.createTextNode(age));
+      time.append(icon('clock', 14), document.createTextNode(age));
       const diffCounts = element('span', undefined, 'diff-counts');
       diffCounts.title = `${pr.additions} additions, ${pr.deletions} deletions`;
       diffCounts.setAttribute('aria-label', diffCounts.title);
@@ -487,12 +407,7 @@ function render() {
         const comments = element('span', undefined, 'comment-count');
         comments.title = `${pr.commentCount} ${pr.commentCount === 1 ? 'comment' : 'comments'}`;
         comments.setAttribute('aria-label', comments.title);
-        const bubble = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-        for (const [key, value] of Object.entries({ viewBox: '0 0 16 16', width: '14', height: '14', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.5', 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'aria-hidden': 'true', focusable: 'false' })) bubble.setAttribute(key, value);
-        const outline = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-        outline.setAttribute('d', 'M3 2.5h10a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1H7l-4 3v-3a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1Z');
-        bubble.append(outline);
-        comments.append(bubble, document.createTextNode(String(pr.commentCount)));
+        comments.append(icon('comment', 14), document.createTextNode(String(pr.commentCount)));
         meta.append(comments);
       }
       for (const label of pr.labels) meta.append(badge(label, 'label'));
