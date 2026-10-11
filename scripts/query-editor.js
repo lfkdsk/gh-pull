@@ -22,7 +22,7 @@ export function createQueryEditor({ parent, value, onChange, onSubmit, getItems 
       EditorView.cspNonce.of(document.querySelector('meta[name="style-nonce"]').content),
       EditorView.lineWrapping,
       EditorView.contentAttributes.of(view => ({ role: 'textbox', 'aria-label': 'Search pull requests', 'aria-describedby': 'query-help query-feedback', 'aria-multiline': 'false', 'aria-invalid': String(Boolean(queryError(view.state.doc.toString()))), autocapitalize: 'off', spellcheck: 'false' })),
-      placeholder('is:pr is:open involves:@me'),
+      placeholder('is:open involves:@me'),
       history(),
       EditorState.transactionFilter.of(tr => {
         if (!tr.docChanged || tr.newDoc.lines === 1) return tr;

@@ -92,7 +92,7 @@ Delivery IDs and payload hashes are kept in memory for 24 hours (up to 1,000 ent
 
 ### Query search
 
-The default query is `is:pr is:open involves:@me sort:updated-desc`. Add qualifiers such as `repo:owner/repository`, `author:octocat`, `-label:wip`, or `label:"good first issue"`, and press **Enter** or **Search**. Free text follows GitHub's search semantics (title, body, and comments by default); it no longer filters just the loaded rows.
+The default query is `is:open involves:@me sort:updated-desc`. The server always adds `is:pr`; type qualifiers cannot be specified in the editor. Add qualifiers such as `repo:owner/repository`, `author:octocat`, `-label:wip`, or `label:"good first issue"`, and press **Enter** or **Search**. Free text follows GitHub's search semantics (title, body, and comments by default); it no longer filters just the loaded rows.
 
 Type a qualifier or press **Ctrl+Space** for suggestions. Use arrow keys to choose, Enter or Tab to accept, and Escape to dismiss. When a suggestion is selected, Enter accepts it; press Enter again to search. Repository, user, branch, and label suggestions come from loaded PRs, and you can type values that aren't suggested.
 

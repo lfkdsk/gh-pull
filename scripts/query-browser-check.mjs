@@ -57,7 +57,7 @@ test('query presets, server search, grouping, custom values and shareable URLs',
   assert.equal(await editor.innerText(), DEFAULT_QUERY);
   assert.equal(await page.locator('#scope').inputValue(), 'involved');
   const firstCalls = calls.length;
-  await editor.fill('is:pr repo:example/dashboard author:alice label:"good first issue" sort:comments-desc');
+  await editor.fill('repo:example/dashboard author:alice label:"good first issue" sort:comments-desc');
   assert.equal(calls.length, firstCalls);
   assert.equal(await page.locator('#scope').inputValue(), 'custom');
   assert.equal(await page.locator('#state').inputValue(), 'all');
@@ -103,46 +103,46 @@ test('autocomplete keyboard, mid-query replacements, escaped input, undo and foc
   const { page, editor, open, calls, errors } = await fixture(t);
   await open();
   const before = calls.length;
-  await editor.fill('is:pr ');
+  await editor.fill('');
   await editor.press('End');
   await page.keyboard.type('rep');
   await page.locator('.cm-tooltip-autocomplete').waitFor();
   await editor.press('Enter');
-  assert.equal(await editor.innerText(), 'is:pr repo:');
+  assert.equal(await editor.innerText(), 'repo:');
   assert.equal(calls.length, before);
   await editor.press('Control+Space');
   await page.getByRole('option', { name: 'example/dashboard', exact: true }).waitFor();
   await editor.press('Tab');
-  assert.equal(await editor.innerText(), 'is:pr repo:example/dashboard');
+  assert.equal(await editor.innerText(), 'repo:example/dashboard');
   await editor.press('Enter');
   await page.waitForFunction(() => !document.querySelector('#refresh').disabled);
   assert.equal(calls.at(-1).query, 'is:pr repo:example/dashboard');
 
-  await editor.fill('is:pr repo:ex label:bug');
+  await editor.fill('repo:ex label:bug');
   await editor.press('Home');
-  for (let i = 0; i < 'is:pr repo:ex'.length; i++) await editor.press('ArrowRight');
+  for (let i = 0; i < 'repo:ex'.length; i++) await editor.press('ArrowRight');
   await editor.press('Control+Space');
   await page.getByRole('option', { name: 'example/dashboard', exact: true }).click();
-  assert.equal(await editor.innerText(), 'is:pr repo:example/dashboard label:bug');
+  assert.equal(await editor.innerText(), 'repo:example/dashboard label:bug');
 
-  await editor.fill('is:pr label:');
+  await editor.fill('label:');
   await editor.press('End'); await editor.press('Control+Space');
   await page.getByRole('option', { name: '"good first issue"', exact: true }).click();
-  assert.equal(await editor.innerText(), 'is:pr label:"good first issue"');
+  assert.equal(await editor.innerText(), 'label:"good first issue"');
   await editor.press('Control+z');
-  assert.equal(await editor.innerText(), 'is:pr label:');
+  assert.equal(await editor.innerText(), 'label:');
   await editor.press('Control+y');
-  assert.equal(await editor.innerText(), 'is:pr label:"good first issue"');
-  await editor.fill('is:pr author:'); await editor.press('End'); await editor.press('Control+Space');
+  assert.equal(await editor.innerText(), 'label:"good first issue"');
+  await editor.fill('author:'); await editor.press('End'); await editor.press('Control+Space');
   await page.locator('.cm-tooltip-autocomplete').waitFor();
   await editor.press('ArrowDown');
   await editor.press('Escape');
   assert.equal(await page.locator('.cm-tooltip-autocomplete').count(), 0);
-  assert.equal(await editor.innerText(), 'is:pr author:');
-  await editor.fill('is:pr'); await editor.press('Escape'); await editor.press('Tab');
+  assert.equal(await editor.innerText(), 'author:');
+  await editor.fill(''); await editor.press('Escape'); await editor.press('Tab');
   assert.equal(await page.locator('#query-submit').evaluate(node => document.activeElement === node), true);
-  await editor.fill('is:pr\nrepo:example/dashboard');
-  assert.equal(await editor.innerText(), 'is:pr repo:example/dashboard');
+  await editor.fill('is:open\nrepo:example/dashboard');
+  assert.equal(await editor.innerText(), 'is:open repo:example/dashboard');
   assert.equal(await page.locator('.query-value').count() > 0, true);
   assert.deepEqual(errors, []);
 });
@@ -163,12 +163,12 @@ test('invalid drafts are local, failed searches can retry, pagination preserves 
   assert.equal(await page.locator('.pr-row').count(), 2);
   f.release();
   await page.waitForFunction(() => !document.querySelector('#refresh').disabled);
-  assert.equal(calls.at(-1).query, DEFAULT_QUERY);
+  assert.equal(calls.at(-1).query, `is:pr ${DEFAULT_QUERY}`);
   assert.equal(await editor.innerText(), 'label:"unfinished');
   assert.equal(new URL(page.url()).searchParams.get('q'), DEFAULT_QUERY);
 
   f.fail(true);
-  await f.submit('is:pr repo:example/sdk');
+  await f.submit('repo:example/sdk');
   await page.locator('#error').waitFor();
   assert.match(await page.locator('#error').textContent(), /Search is temporarily unavailable/);
   f.fail(false); await page.getByRole('button', { name: 'Retry', exact: true }).click();
@@ -177,10 +177,10 @@ test('invalid drafts are local, failed searches can retry, pagination preserves 
   await page.waitForFunction(() => document.querySelectorAll('.pr-row').length === 3);
   assert.deepEqual(calls.at(-1), { query: 'is:pr repo:example/sdk', cursor: 'page2' });
   assert.equal(await page.locator('#more').isVisible(), false);
-  await editor.fill('is:pr author:unsubmitted');
+  await editor.fill('author:unsubmitted');
   await page.click('#refresh'); await page.waitForFunction(() => !document.querySelector('#refresh').disabled);
   assert.deepEqual(calls.at(-1), { query: 'is:pr repo:example/sdk', cursor: null });
-  assert.equal(await editor.innerText(), 'is:pr author:unsubmitted');
+  assert.equal(await editor.innerText(), 'author:unsubmitted');
   assert.deepEqual(f.errors, []);
 });
 
@@ -195,13 +195,13 @@ test('late search responses cannot replace newer results', async t => {
     await route.fulfill({ json: { viewer: 'alice', total: 1, items: [{ ...pulls[0], title: 'STALE RESPONSE' }], pageInfo: { hasNextPage: false } } }).catch(() => {});
   });
   await open();
-  await editor.fill('is:pr repo:slow/repo'); await page.click('#query-submit');
-  await submit('is:pr repo:fast/repo');
+  await editor.fill('repo:slow/repo'); await page.click('#query-submit');
+  await submit('repo:fast/repo');
   release();
   // A full refresh after release also verifies the applied query stayed current.
   await page.click('#refresh'); await page.waitForFunction(() => !document.querySelector('#refresh').disabled);
   assert.equal(await page.getByText('STALE RESPONSE').count(), 0);
-  assert.equal(await editor.innerText(), 'is:pr repo:fast/repo');
+  assert.equal(await editor.innerText(), 'repo:fast/repo');
   assert.deepEqual(errors, []);
 });
 
@@ -214,7 +214,7 @@ test('editor and suggestions fit mobile and desktop in light and dark themes', a
     await page.emulateMedia({ colorScheme });
     for (const width of [1440, 768, 375, 320]) {
       await page.setViewportSize({ width, height: 900 });
-      await editor.fill('is:pr is:open involves:@me repo:example/dashboard label:"good first issue" r');
+      await editor.fill('is:open involves:@me repo:example/dashboard label:"good first issue" r');
       await editor.press('End'); await editor.press('Control+Space');
       await page.locator('.cm-tooltip-autocomplete').waitFor();
       const rect = await page.locator('.cm-tooltip-autocomplete').boundingBox();
@@ -234,7 +234,7 @@ test('query controls and suggestions have accessible names, roles, contrast and 
   await open();
   for (const colorScheme of ['light', 'dark']) {
     await page.emulateMedia({ colorScheme });
-    await editor.fill('is:pr re'); await editor.press('End'); await editor.press('Control+Space');
+    await editor.fill('re'); await editor.press('End'); await editor.press('Control+Space');
     await page.locator('.cm-tooltip-autocomplete').waitFor();
     const result = await new AxeBuilder({ page }).include('#filters').withTags(['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa']).analyze();
     assert.deepEqual(result.violations.map(v => ({ id: v.id, nodes: v.nodes.map(n => n.target) })), []);
@@ -242,7 +242,7 @@ test('query controls and suggestions have accessible names, roles, contrast and 
   }
   await editor.fill('label:"unfinished');
   assert.equal(await editor.getAttribute('aria-invalid'), 'true');
-  await editor.fill('is:pr');
+  await editor.fill('');
   assert.equal(await editor.getAttribute('aria-invalid'), 'false');
   assert.deepEqual(errors, []);
 });
@@ -261,8 +261,30 @@ test('hosted login skips the editor bundle and an invalid bookmarked query can b
   await editor.waitFor();
   assert.equal(calls.length, 0);
   assert.match(await page.locator('#summary').textContent(), /valid query/);
-  await f.submit('is:pr');
+  await f.submit('');
   await page.locator('.pr-row').first().waitFor();
   assert.equal(calls.at(-1).query, 'is:pr');
   assert.deepEqual(f.errors, []);
+});
+
+test('PR-only restriction is hidden, enforced, and migrated from old query links', async t => {
+  const { page, editor, open, submit, calls, errors } = await fixture(t);
+  await open(`is:pr ${DEFAULT_QUERY}`);
+  assert.equal(await editor.innerText(), DEFAULT_QUERY);
+  assert.equal(calls.at(-1).query, `is:pr ${DEFAULT_QUERY}`);
+  const before = calls.length;
+  for (const value of ['is:pr', 'type:pr', 'is:issue', '-is:pr']) {
+    await editor.fill(value);
+    assert.equal(await page.locator('#query-submit').isDisabled(), true);
+    assert.match(await page.locator('#query-feedback').textContent(), /selected automatically/);
+    await editor.press('Enter');
+    assert.equal(calls.length, before);
+  }
+  await submit('');
+  assert.equal(calls.at(-1).query, 'is:pr');
+  assert.equal(new URL(page.url()).searchParams.get('q'), '');
+  await editor.fill('is:'); await editor.press('End'); await editor.press('Control+Space');
+  await page.locator('.cm-tooltip-autocomplete').waitFor();
+  assert.equal(await page.getByRole('option', { name: 'pr', exact: true }).count(), 0);
+  assert.deepEqual(errors, []);
 });

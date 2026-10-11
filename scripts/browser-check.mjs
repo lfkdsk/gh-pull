@@ -117,10 +117,10 @@ test('clipboard, filters, background refresh, icons and responsive metadata styl
     await page.selectOption('#scope', scope);
     assert.equal(await page.locator('#scope').inputValue(), scope);
   }
-  await page.locator('.cm-content').fill('is:pr does-not-exist');
+  await page.locator('.cm-content').fill('does-not-exist');
   await page.click('#query-submit');
   await page.waitForFunction(() => !document.querySelector('.pr-row'));
-  await page.locator('.cm-content').fill('is:pr'); await page.click('#query-submit'); await page.locator('.pr-row').waitFor();
+  await page.locator('.cm-content').fill(''); await page.click('#query-submit'); await page.locator('.pr-row').waitFor();
   f.holdRefresh(); await page.click('#refresh');
   assert.equal(await page.locator('#refresh').isDisabled(), true);
   assert.equal(await page.locator('.pr-row').count(), 1);

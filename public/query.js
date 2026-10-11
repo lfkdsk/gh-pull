@@ -1,6 +1,6 @@
 // Query strings are the persistent search value. No DOM or storage dependencies:
 // URLs, presets, and future named searches all use these same operations.
-export const DEFAULT_QUERY = 'is:pr is:open involves:@me sort:updated-desc';
+export const DEFAULT_QUERY = 'is:open involves:@me sort:updated-desc';
 export const MAX_QUERY_LENGTH = 2000;
 const scopeValues = { authored: 'author:@me', involved: 'involves:@me', review: 'review-requested:@me', all: '' };
 const stateValues = { open: 'is:open', closed: 'is:closed is:unmerged', merged: 'is:merged', all: '' };
@@ -34,8 +34,9 @@ export function queryError(query) {
   for (const token of tokenizeQuery(query)) {
     if (['AND', 'OR', 'NOT'].includes(token.raw)) return 'Boolean operators are not supported yet. Use search qualifiers or quoted phrases.';
     if (token.key && !token.value) return `Add a value after ${token.key}:`;
-    if ((token.key === 'type' || (token.key === 'is' && ['pr', 'issue'].includes(token.value))) &&
-        (token.value !== 'pr' || token.negative)) return 'This dashboard searches pull requests. Use is:pr.';
+    if (token.key === 'type' || (token.key === 'is' && ['pr', 'issue'].includes(token.value))) {
+      return 'Pull requests are selected automatically. Remove the type qualifier.';
+    }
   }
   return null;
 }
@@ -43,9 +44,12 @@ export function queryError(query) {
 export function normalizeQuery(query) {
   const error = queryError(query);
   if (error) throw new Error(error);
-  const tokens = tokenizeQuery(query);
-  const parts = tokens.filter(t => !(t.key === 'type' || (t.key === 'is' && t.value === 'pr'))).map(t => t.raw);
-  return ['is:pr', ...parts].join(' ');
+  return tokenizeQuery(query).map(t => t.raw).join(' ');
+}
+
+// The server, not the editable query, owns the mandatory PR-only restriction.
+export function toGitHubQuery(query) {
+  return ['is:pr', normalizeQuery(query)].filter(Boolean).join(' ');
 }
 
 function belongsTo(token, control) {
@@ -76,7 +80,11 @@ export function setQueryPreset(query, control, value) {
 
 // Old bookmarks keep their scope/state and text; new URLs need only q + group.
 export function queryFromParams(params) {
-  if (params.has('q')) return params.get('q');
+  if (params.has('q')) {
+    // Migrate links from when the fixed PR constraint was shown in the editor.
+    return tokenizeQuery(params.get('q')).filter(t => !(!t.negative && ['is', 'type'].includes(t.key) && t.value === 'pr'))
+      .map(t => t.raw).join(' ');
+  }
   let query = DEFAULT_QUERY;
   for (const control of Object.keys(presets)) {
     if (params.has(control)) query = setQueryPreset(query, control, params.get(control));
@@ -89,12 +97,12 @@ const qualifiers = {
   repo: 'Repository', org: 'Organization', user: 'Repository owner', author: 'Author', involves: 'Involving user',
   'review-requested': 'Review requested', 'reviewed-by': 'Reviewed by', 'review-involves': 'Review involves',
   assignee: 'Assignee', mentions: 'Mentioned user', commenter: 'Commenter', label: 'Label',
-  is: 'State or type', draft: 'Draft status', review: 'Review status', status: 'Commit checks',
+  is: 'State or visibility', draft: 'Draft status', review: 'Review status', status: 'Commit checks',
   sort: 'Sort order', in: 'Search fields', base: 'Base branch', head: 'Head branch',
   created: 'Created date', updated: 'Updated date', merged: 'Merged date', closed: 'Closed date', comments: 'Comment count',
 };
 const values = {
-  is: ['pr', 'open', 'closed', 'merged', 'unmerged', 'draft', 'public', 'private'],
+  is: ['open', 'closed', 'merged', 'unmerged', 'draft', 'public', 'private'],
   draft: ['true', 'false'], review: ['none', 'required', 'approved', 'changes_requested'],
   status: ['pending', 'success', 'failure'], in: ['title', 'body', 'comments'],
   sort: ['updated-desc', 'updated-asc', 'created-desc', 'created-asc', 'comments-desc', 'comments-asc'],

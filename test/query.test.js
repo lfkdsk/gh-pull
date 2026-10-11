@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { tokenizeQuery, queryPresets, setQueryPreset, normalizeQuery, queryError, queryFromParams, queryCompletions, DEFAULT_QUERY } from '../public/query.js';
+import { tokenizeQuery, queryPresets, setQueryPreset, normalizeQuery, toGitHubQuery, queryError, queryFromParams, queryCompletions, DEFAULT_QUERY } from '../public/query.js';
 import { createApp } from '../server.js';
 import { createGitHub } from '../github.js';
 import { groupPulls } from '../public/model.js';
@@ -12,16 +12,24 @@ test('query tokens preserve quotes, exclusions, original case and caret ranges',
   for (const token of tokens) assert.equal(query.slice(token.from, token.to), token.raw);
   assert.equal(tokens[2].negative, true);
   assert.equal(tokens[3].key, null);
-  assert.equal(normalizeQuery(`  type:pr  ${query}  `), query);
+  assert.equal(normalizeQuery('  label:"Good first issue"  -author:Bob  '), 'label:"Good first issue" -author:Bob');
 });
 
 test('validation restricts results to PRs and bounds malformed or unsupported input', () => {
-  for (const query of ['is:issue', 'type:issue', '-is:pr', '-type:pr', 'repo:', 'label:""', 'label:"unclosed', 'x\ny', 'a'.repeat(2001), 'a OR b', '(repo:a repo:b)']) {
+  for (const query of ['is:pr', 'type:pr', 'is:issue', 'type:issue', '-is:pr', '-type:pr', '-is:issue', 'repo:', 'label:""', 'label:"unclosed', 'x\ny', 'a'.repeat(2001), 'a OR b', '(repo:a repo:b)']) {
     assert.ok(queryError(query), query);
     assert.throws(() => normalizeQuery(query));
   }
-  for (const query of ['', 'is:pr', 'label:"AND (OR)"', 'updated:>=2026-01-01', 'author:app/robot', '-label:wip', 'label:"quote\\\"here"']) assert.equal(queryError(query), null, query);
-  assert.equal(normalizeQuery(''), 'is:pr');
+  for (const query of ['', 'is:open', 'label:"AND (OR)"', 'updated:>=2026-01-01', 'author:app/robot', '-label:wip', 'label:"quote\\\"here"']) assert.equal(queryError(query), null, query);
+  assert.equal(normalizeQuery(''), '');
+});
+
+test('PR-only constraint belongs to server queries and never appears in suggestions', () => {
+  assert.equal(toGitHubQuery(''), 'is:pr');
+  assert.equal(toGitHubQuery(DEFAULT_QUERY), `is:pr ${DEFAULT_QUERY}`);
+  assert.equal(toGitHubQuery('is:open "is:issue"'), 'is:pr is:open "is:issue"');
+  for (const value of ['is:pr', 'type:pr', 'is:issue', '-is:pr']) assert.throws(() => toGitHubQuery(value));
+  assert.ok(!queryCompletions('is:', 3).options.some(o => ['pr', 'issue'].includes(o.label)));
 });
 
 test('presets reflect custom and conflicting qualifiers without hiding constraints', () => {
@@ -56,6 +64,8 @@ test('URLs migrate old filters and favor the complete query over legacy paramete
   assert.ok(legacy.endsWith(' keyboard'));
   assert.equal(queryFromParams(new URLSearchParams('q=repo:one/two&scope=authored')), 'repo:one/two');
   assert.equal(queryFromParams(new URLSearchParams('q=')), '');
+  assert.equal(queryFromParams(new URLSearchParams('q=is:pr+is:open+type:pr')), 'is:open');
+  assert.equal(queryFromParams(new URLSearchParams('q=is:issue')), 'is:issue');
 });
 
 test('completion replaces only the active token, with quoted labels and local metadata', () => {
@@ -97,7 +107,7 @@ test('query HTTP cache isolates searches and cursors, refresh bypasses it, inval
     { query: 'is:pr repo:a/b', cursor: null }, { query: 'is:pr repo:c/d', cursor: null },
     { query: 'is:pr repo:a/b', cursor: 'next' }, { query: 'is:pr repo:a/b', cursor: null },
   ]);
-  assert.equal((await fetchQuery('is:issue')).status, 400);
+  for (const q of ['is:pr', 'type:pr', 'is:issue', '-is:pr']) assert.equal((await fetchQuery(q)).status, 400);
   assert.equal(calls.length, 4);
   const page = await fetch(origin);
   const html = await page.text();

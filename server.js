@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
 import { randomBytes } from 'node:crypto';
-import { normalizeQuery } from './public/query.js';
+import { toGitHubQuery } from './public/query.js';
 import { createGitHub, ApiError, validateTitleUpdate, validateDraftUpdate, validateMerge } from './github.js';
 import { authConfig, createAuth } from './auth.js';
 import { createMarketplaceWebhook } from './marketplace.js';
@@ -105,7 +105,7 @@ export function createApp({ list = createGitHub(), updateTitle = list.updateTitl
         }
         let query;
         if (url.searchParams.has('q')) {
-          try { query = normalizeQuery(url.searchParams.get('q')); }
+          try { query = toGitHubQuery(url.searchParams.get('q')); }
           catch (error) { return send(400, { error: error.message }); }
         }
         const key = JSON.stringify(query === undefined ? [scope, state, cursor] : ['query', query, cursor]);
