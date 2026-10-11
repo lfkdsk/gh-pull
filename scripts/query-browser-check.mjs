@@ -250,7 +250,7 @@ test('query controls and suggestions have accessible names, roles, contrast and 
 test('hosted login skips the editor bundle and an invalid bookmarked query can be corrected', async t => {
   const f = await fixture(t), { page, origin, editor, calls } = f;
   const bundles = [];
-  page.on('request', request => { if (request.url().endsWith('/query-editor.js')) bundles.push(request.url()); });
+  page.on('request', request => { if (/\/(query-editor\.js|vendor\/codemirror\.js)$/.test(request.url())) bundles.push(request.url()); });
   await page.route(`${origin}/api/session`, route => route.fulfill({ json: { mode: 'github-app', authenticated: false } }));
   await page.goto(origin);
   await page.getByRole('link', { name: 'Sign in with GitHub' }).waitFor();

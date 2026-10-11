@@ -16,7 +16,8 @@ const assets = new Map([
   ['/state.js', ['state.js', 'text/javascript']],
   ['/query.js', ['query.js', 'text/javascript']],
   ['/query-editor.js', ['query-editor.js', 'text/javascript']],
-  ['/query-editor.LICENSE.txt', ['query-editor.LICENSE.txt', 'text/plain']],
+  ['/vendor/codemirror.js', ['vendor/codemirror.js', 'text/javascript']],
+  ['/vendor/codemirror.LICENSE.txt', ['vendor/codemirror.LICENSE.txt', 'text/plain']],
   ['/style.css', ['style.css', 'text/css']],
   ['/favicon.svg', ['favicon.svg', 'image/svg+xml']],
 ]);

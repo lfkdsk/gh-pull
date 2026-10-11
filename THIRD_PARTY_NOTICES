@@ -2,7 +2,7 @@ CodeMirror query editor and bundled dependencies
 https://codemirror.net/
 
 MIT licenses and copyright notices are included in
-public/query-editor.LICENSE.txt, alongside the generated browser bundle.
+public/vendor/codemirror.LICENSE.txt, alongside the generated browser bundle.
 
 ---
 

@@ -145,7 +145,9 @@ npm run test:browser
 
 To use an existing Chrome installation instead, set `CHROME_BIN` to its executable path when running `npm run test:browser`. Browser screenshots are written to `/tmp/gh-pull-query-browser` (override with `BROWSER_ARTIFACT_DIR`).
 
-After changing `scripts/query-editor.js` or updating its dependencies, run `npm run build:editor` and commit the generated bundle and license notices. `public/query.js` contains the shared query model and is loaded separately. CodeMirror, esbuild, and Playwright are development dependencies; running the server does not require installing them. The editor loads only after authentication.
+Our editor integration lives in `public/query-editor.js`; the shared query model lives in `public/query.js`. Both are ordinary source files and can be edited without rebuilding. Generated third-party code and its license notices live separately in `public/vendor/`.
+
+After updating CodeMirror dependencies or the exported APIs in `scripts/vendor/codemirror.js`, run `npm run build:vendor` and commit the generated files. CodeMirror, esbuild, and Playwright are development dependencies; running the server does not require installing them. The editor and vendor bundle load only after authentication.
 
 ## License
 
