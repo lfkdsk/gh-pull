@@ -125,6 +125,16 @@ npm test
 
 Tests use Node's built-in test runner and mocked GitHub responses. They cover PR behavior, authentication, token refresh, session isolation, and request validation without credentials or network access.
 
+Browser interaction tests use Playwright with isolated fixture PRs. They cover editing, draft/ready changes, merges, read tracking, clipboard feedback, filters, background refresh, and light/dark mobile layouts. All mutations stay in the fixture server; external browser requests are blocked.
+
+```sh
+npm ci
+npx playwright install chromium
+npm run test:browser
+```
+
+To use an existing Chrome installation instead, set `CHROME_BIN` to its executable path when running `npm run test:browser`. Playwright is a development-only dependency; the app still has no runtime dependencies.
+
 ## License
 
 [MIT](LICENSE) © 2026 shiqicao. Third-party attribution and license terms are listed in [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES).

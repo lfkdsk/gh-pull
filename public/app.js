@@ -1,4 +1,6 @@
-import { assignNameColors, NAME_COLOR_COUNT, groupPulls, labels, relativeTime, normalizeViewedUpdates, hasUnviewedUpdate } from './model.js';
+import { createViewedStore, createLatestRequest, mergePullPages } from './state.js';
+import { element, icon, clipboardFeedback } from './ui.js';
+import { assignNameColors, NAME_COLOR_COUNT, groupPulls, labels, relativeTime } from './model.js';
 
 const $ = id => document.getElementById(id);
 const controls = ['scope', 'state', 'search', 'group', 'sort'];
@@ -7,7 +9,8 @@ for (const id of controls) {
   const input = $(id), value = params.get(id);
   if (value !== null && (id === 'search' || [...input.options].some(option => option.value === value))) input.value = value;
 }
-let items = [], total = 0, cursor = null, more = false, limited = false, loading = false, controller, generation = 0;
+let items = [], total = 0, cursor = null, more = false, limited = false, loading = false;
+const loads = createLatestRequest();
 const refreshInterval = 60_000;
 let nextRefreshAt = Date.now() + refreshInterval;
 let authMode = 'local', authenticated = false;
@@ -17,7 +20,7 @@ function scheduleMergeReadiness(attempt = 0) {
   clearTimeout(readinessTimer);
   readinessController?.abort();
   if (!authenticated || attempt >= 5 || !items.some(pr => pr.mergePending && pr.status === 'OPEN')) return;
-  const version = generation;
+  const version = loads.revision;
   readinessTimer = setTimeout(async () => {
     if (loading || titleEdits.size || [...draftChanges.values(), ...merges.values()].some(change => change.saving)) {
       scheduleMergeReadiness(attempt);
@@ -31,7 +34,7 @@ function scheduleMergeReadiness(attempt = 0) {
       const response = await apiFetch(`/api/pulls/readiness?${query}`, { signal: requestController.signal });
       if (!response.ok) throw new Error('Could not check merge readiness.');
       const data = await response.json();
-      if (version !== generation || requestController.signal.aborted || !authenticated) return;
+      if (version !== loads.revision || requestController.signal.aborted || !authenticated) return;
       for (const update of data.items) {
         const pr = items.find(item => item.id === update.id);
         // Never offer a merge against a commit that is not the displayed version.
@@ -39,7 +42,7 @@ function scheduleMergeReadiness(attempt = 0) {
       }
       if (!titleEdits.size) render();
     } catch { /* Normal refresh remains available if this short retry fails. */ }
-    if (version === generation && !requestController.signal.aborted) scheduleMergeReadiness(attempt + 1);
+    if (version === loads.revision && !requestController.signal.aborted) scheduleMergeReadiness(attempt + 1);
   }, 2000);
 }
 
@@ -72,12 +75,10 @@ let viewerLogin = '';
 const nameColorKey = 'gh-pull.name-colors.v1';
 let nameColors = assignNameColors([]);
 try { nameColors = assignNameColors([], JSON.parse(localStorage.getItem(nameColorKey))); } catch { /* Session colors still work if storage is unavailable. */ }
-let viewedKey = null, viewedUpdates = {};
-
-function readViewedUpdates() {
-  try { return normalizeViewedUpdates(JSON.parse(localStorage.getItem(viewedKey))); }
-  catch { return viewedUpdates; }
-}
+const viewedStore = createViewedStore({
+  getItem: key => localStorage.getItem(key),
+  setItem: (key, value) => localStorage.setItem(key, value),
+});
 
 function updateSummary() {
   const { count } = groupPulls(items, { search: $('search').value, group: $('group').value, sort: $('sort').value });
@@ -88,7 +89,7 @@ function updateTitleBrightness() {
   const byId = new Map(items.map(pr => [pr.id, pr]));
   for (const row of $('results').querySelectorAll('.pr-row')) {
     const pr = byId.get(row.dataset.prId);
-    const hasUpdates = pr && hasUnviewedUpdate(pr, viewedUpdates);
+    const hasUpdates = pr && viewedStore.hasUpdates(pr);
     row.classList.toggle('has-updates', Boolean(hasUpdates));
     if (pr) row.querySelector('.pr-title').setAttribute('aria-label', `${hasUpdates ? 'New updates: ' : ''}${pr.title} (opens in a new tab)`);
   }
@@ -96,30 +97,12 @@ function updateTitleBrightness() {
 }
 
 function markViewed(pr) {
-  const timestamp = Date.parse(pr.updatedAt);
-  if (!Number.isFinite(timestamp) || !viewedKey) return;
-  const saved = readViewedUpdates();
-  for (const [id, seen] of Object.entries(saved)) viewedUpdates[id] = Math.max(viewedUpdates[id] ?? 0, seen);
-  // Record the version actually shown, not the current time: a newer update may
-  // already exist on GitHub but not yet have reached this dashboard's cache.
-  viewedUpdates[pr.id] = Math.max(viewedUpdates[pr.id] ?? 0, timestamp);
-  try { localStorage.setItem(viewedKey, JSON.stringify(viewedUpdates)); } catch { /* Session-only tracking when storage is unavailable. */ }
-  updateTitleBrightness();
+  if (viewedStore.mark(pr)) updateTitleBrightness();
 }
 
 window.addEventListener('storage', event => {
-  if (viewedKey && (event.key === viewedKey || event.key === null)) {
-    viewedUpdates = readViewedUpdates();
-    updateTitleBrightness();
-  }
+  if (viewedStore.storageChanged(event.key)) updateTitleBrightness();
 });
-
-function element(tag, text, className) {
-  const node = document.createElement(tag);
-  if (text !== undefined) node.textContent = text;
-  if (className) node.className = className;
-  return node;
-}
 
 function badge(text, kind) { return element('span', text, `badge ${kind.toLowerCase()}`); }
 
@@ -147,60 +130,65 @@ function repositoryLink(repo) {
   return link;
 }
 
-async function mergePull(pr) {
-  if (authMode === 'github-app' && !pr.mergeAccess?.allowed) return;
-  if (merges.get(pr.id)?.saving) return;
-  const change = { saving: true, error: '' };
-  merges.set(pr.id, change); render();
+const changeMessages = {
+  title: { failure: 'Could not update the title. Please retry.', timeout: 'The save timed out. Retry to check and save the title.' },
+  status: { failure: 'Could not change the PR status. Please retry.', timeout: 'Status change timed out. Click the status badge to retry or refresh to check its status.' },
+  merge: { failure: 'Merge failed. Refresh to check its status.', timeout: 'Merge timed out. Refresh to check whether GitHub merged it.' },
+};
+
+// All mutations share pending/error handling and mark only the confirmed version
+// as read. Action callbacks handle the few differences in visible state and focus.
+async function changePull(pr, changes, { action, input = {}, apply, message, onSuccess, onError }) {
+  const change = changes.get(pr.id) ?? {};
+  if (change.saving) return;
+  change.saving = true; change.error = '';
+  changes.set(pr.id, change); render();
+  const messages = changeMessages[action] ?? changeMessages.status;
   try {
-    const response = await apiFetch('/api/pulls/merge', {
+    const response = await apiFetch(`/api/pulls/${action}`, {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: pr.id, headOid: pr.headOid, mergeMethod: pr.mergeMethod }),
-      signal: AbortSignal.timeout(65_000),
+      body: JSON.stringify({ id: pr.id, ...input }), signal: AbortSignal.timeout(65_000),
     });
     const data = await response.json();
-    if (!response.ok) throw new Error(data.error || 'Merge failed. Refresh to check its status.');
-    const current = items.find(item => item.id === pr.id);
-    if (current) {
+    if (!response.ok) throw new Error(data.error || messages.failure);
+    apply(items.find(item => item.id === pr.id), data);
+    changes.delete(pr.id); render();
+    markViewed({ id: pr.id, updatedAt: data.updatedAt });
+    $('summary').append(document.createTextNode(` · ${message}`));
+    onSuccess?.();
+  } catch (error) {
+    change.saving = false;
+    change.error = error.name === 'TimeoutError' ? messages.timeout : error.message;
+    render(); onError?.();
+  }
+}
+
+async function mergePull(pr) {
+  if (authMode === 'github-app' && !pr.mergeAccess?.allowed) return;
+  await changePull(pr, merges, {
+    action: 'merge', input: { headOid: pr.headOid, mergeMethod: pr.mergeMethod },
+    message: `Merged ${pr.repo} #${pr.number}`,
+    apply(current, data) {
+      if (!current) return;
       Object.assign(current, data);
       if ($('state').value === 'open') {
         items = items.filter(item => item.id !== pr.id);
         total = Math.max(0, total - 1);
       }
-    }
-    merges.delete(pr.id); render();
-    markViewed({ id: pr.id, updatedAt: data.updatedAt });
-    $('summary').append(document.createTextNode(` · Merged ${pr.repo} #${pr.number}`));
-  } catch (error) {
-    change.saving = false;
-    change.error = error.name === 'TimeoutError' ? 'Merge timed out. Refresh to check whether GitHub merged it.' : error.message;
-    render();
-  }
+    },
+  });
 }
 
 async function changeDraftStatus(pr) {
-  if (draftChanges.get(pr.id)?.saving) return;
   const toDraft = pr.status === 'OPEN';
-  const change = { saving: true, error: '' };
-  draftChanges.set(pr.id, change); render();
-  try {
-    const response = await apiFetch(toDraft ? '/api/pulls/draft' : '/api/pulls/ready', {
-      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: pr.id }), signal: AbortSignal.timeout(65_000),
-    });
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error || 'Could not change the PR status. Please retry.');
-    const current = items.find(item => item.id === pr.id);
-    if (current) { current.status = data.status; current.updatedAt = data.updatedAt; current.review = data.review; current.canMerge = false; current.mergePending = !toDraft; }
-    draftChanges.delete(pr.id); render();
-    markViewed({ id: pr.id, updatedAt: data.updatedAt });
-    scheduleMergeReadiness();
-    $('summary').append(document.createTextNode(toDraft ? ' · PR converted to draft' : ' · PR ready for review'));
-  } catch (error) {
-    change.saving = false;
-    change.error = error.name === 'TimeoutError' ? 'Status change timed out. Click the status badge to retry or refresh to check its status.' : error.message;
-    render();
-  }
+  await changePull(pr, draftChanges, {
+    action: toDraft ? 'draft' : 'ready',
+    message: toDraft ? 'PR converted to draft' : 'PR ready for review',
+    apply(current, data) {
+      if (current) Object.assign(current, { status: data.status, updatedAt: data.updatedAt, review: data.review, canMerge: false, mergePending: !toDraft });
+    },
+    onSuccess: scheduleMergeReadiness,
+  });
 }
 
 function focusTitleControl(id, selector) {
@@ -238,26 +226,15 @@ function titleEditor(pr) {
   form.addEventListener('submit', async event => {
     event.preventDefault();
     if (draft.saving || !draft.value.trim() || draft.value.trim() === draft.expectedTitle) return;
-    draft.saving = true; draft.error = ''; render();
-    try {
-      const response = await apiFetch('/api/pulls/title', {
-        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: pr.id, title: draft.value.trim(), expectedTitle: draft.expectedTitle }),
-        signal: AbortSignal.timeout(65_000),
-      });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || 'Could not update the title. Please retry.');
-      const current = items.find(item => item.id === pr.id);
-      if (current) { current.title = data.title; current.updatedAt = data.updatedAt; }
-      titleEdits.delete(pr.id); render();
-      markViewed({ id: pr.id, updatedAt: data.updatedAt });
-      $('summary').append(document.createTextNode(' · Title updated'));
-      focusTitleControl(pr.id, '.edit-title');
-    } catch (error) {
-      draft.saving = false;
-      draft.error = error.name === 'TimeoutError' ? 'The save timed out. Retry to check and save the title.' : error.message;
-      render(); focusTitleControl(pr.id, '.title-editor input');
-    }
+    await changePull(pr, titleEdits, {
+      action: 'title', input: { title: draft.value.trim(), expectedTitle: draft.expectedTitle },
+      message: 'Title updated',
+      apply(current, data) {
+        if (current) Object.assign(current, { title: data.title, updatedAt: data.updatedAt });
+      },
+      onSuccess: () => focusTitleControl(pr.id, '.edit-title'),
+      onError: () => focusTitleControl(pr.id, '.title-editor input'),
+    });
   });
   return form;
 }
@@ -280,7 +257,7 @@ function render() {
     for (const pr of prs) {
       const row = element('li', undefined, 'pr-row');
       row.dataset.prId = pr.id;
-      const hasUpdates = hasUnviewedUpdate(pr, viewedUpdates);
+      const hasUpdates = viewedStore.hasUpdates(pr);
       row.classList.toggle('has-updates', hasUpdates);
       const onOpen = event => {
         if ((event.type === 'click' && event.button === 0) || (event.type === 'auxclick' && event.button === 1)) {
@@ -312,31 +289,8 @@ function render() {
         copy.type = 'button';
         copy.title = 'Copy PR link';
         copy.setAttribute('aria-label', `Copy link to ${pr.title}`);
-        const copyIcon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-        for (const [key, value] of Object.entries({ viewBox: '0 0 16 16', width: '16', height: '16', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.5', 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'aria-hidden': 'true', focusable: 'false' })) copyIcon.setAttribute(key, value);
-        const copyPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-        copyPath.setAttribute('d', 'M5 3V2a1 1 0 0 1 1-1h8a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1h-1 M2 5h8a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1Z');
-        copyIcon.append(copyPath);
-        copy.append(copyIcon);
-        let feedbackTimer;
-        copy.addEventListener('click', async () => {
-          clearTimeout(feedbackTimer);
-          try {
-            await navigator.clipboard.writeText(title.href);
-            copy.textContent = '✓';
-            copy.title = 'PR link copied';
-            feedback.textContent = 'PR link copied';
-          } catch {
-            copy.textContent = '!';
-            copy.title = 'Could not copy. Allow clipboard access and retry.';
-            feedback.textContent = copy.title;
-          }
-          feedbackTimer = setTimeout(() => {
-            copy.replaceChildren(copyIcon);
-            copy.title = 'Copy PR link';
-            feedback.textContent = '';
-          }, 2000);
-        });
+        copy.append(icon('copy'));
+        clipboardFeedback(copy, { text: title.href, feedback, success: 'PR link copied' });
         const actions = element('span', undefined, 'pr-links');
         actions.append(copy);
         const files = element('a', undefined, 'pr-files');
@@ -348,18 +302,7 @@ function render() {
         files.dataset.viewPr = '';
         files.title = 'View code changes (opens in a new tab)';
         files.setAttribute('aria-label', `View code changes for ${pr.title} (opens in a new tab)`);
-        // GitHub Octicons file-diff (MIT); see THIRD_PARTY_NOTICES.
-        const icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-        icon.setAttribute('viewBox', '0 0 16 16');
-        icon.setAttribute('width', '16');
-        icon.setAttribute('height', '16');
-        icon.setAttribute('fill', 'currentColor');
-        icon.setAttribute('aria-hidden', 'true');
-        icon.setAttribute('focusable', 'false');
-        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-        path.setAttribute('d', 'M1 1.75C1 .784 1.784 0 2.75 0h7.586c.464 0 .909.184 1.237.513l2.914 2.914c.329.328.513.773.513 1.237v9.586A1.75 1.75 0 0 1 13.25 16H2.75A1.75 1.75 0 0 1 1 14.25Zm1.75-.25a.25.25 0 0 0-.25.25v12.5c0 .138.112.25.25.25h10.5a.25.25 0 0 0 .25-.25V4.664a.25.25 0 0 0-.073-.177l-2.914-2.914a.25.25 0 0 0-.177-.073ZM8 3.25a.75.75 0 0 1 .75.75v1.5h1.5a.75.75 0 0 1 0 1.5h-1.5v1.5a.75.75 0 0 1-1.5 0V7h-1.5a.75.75 0 0 1 0-1.5h1.5V4A.75.75 0 0 1 8 3.25Zm-3 8a.75.75 0 0 1 .75-.75h4.5a.75.75 0 0 1 0 1.5h-4.5a.75.75 0 0 1-.75-.75Z');
-        icon.append(path);
-        files.append(icon);
+        files.append(icon('files'));
         actions.append(files);
         line.append(actions);
       }
@@ -369,11 +312,7 @@ function render() {
         edit.type = 'button'; edit.title = 'Edit PR title';
         edit.setAttribute('aria-label', `Edit title of ${pr.title}`);
         edit.disabled = Boolean(titleEdits.get(pr.id)?.saving || merges.get(pr.id)?.saving);
-        const pencil = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-        for (const [key, value] of Object.entries({ viewBox: '0 0 16 16', width: '16', height: '16', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.5', 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'aria-hidden': 'true', focusable: 'false' })) pencil.setAttribute(key, value);
-        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-        path.setAttribute('d', 'M10 3l3 3M2 11l-1 4 4-1L14 5a2.12 2.12 0 0 0-3-3Z');
-        pencil.append(path); edit.append(pencil);
+        edit.append(icon('edit'));
         edit.addEventListener('click', () => {
           if (!titleEdits.has(pr.id)) titleEdits.set(pr.id, { value: pr.title, expectedTitle: pr.title, saving: false, error: '' });
           render(); focusTitleControl(pr.id, '.title-editor input');
@@ -432,33 +371,10 @@ function render() {
         branch.type = 'button';
         branch.title = `Copy branch name: ${pr.branch}`;
         branch.setAttribute('aria-label', branch.title);
-        const icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-        for (const [key, value] of Object.entries({ viewBox: '0 0 16 16', width: '14', height: '14', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.5', 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'aria-hidden': 'true', focusable: 'false' })) icon.setAttribute(key, value);
-        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-        path.setAttribute('d', 'M5 3V2a1 1 0 0 1 1-1h8a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1h-1 M2 5h8a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1Z');
-        icon.append(path);
         const symbol = element('span', undefined, 'branch-copy-symbol');
-        symbol.setAttribute('aria-hidden', 'true'); symbol.append(icon);
+        symbol.setAttribute('aria-hidden', 'true'); symbol.append(icon('copy', 14));
         branch.append(element('span', pr.branch, 'branch-name'), symbol);
-        let timer;
-        branch.addEventListener('click', async () => {
-          clearTimeout(timer);
-          try {
-            await navigator.clipboard.writeText(pr.branch);
-            symbol.textContent = '✓';
-            branch.title = 'Branch name copied';
-            feedback.textContent = 'Branch name copied';
-          } catch {
-            symbol.textContent = '!';
-            branch.title = 'Could not copy. Allow clipboard access and retry.';
-            feedback.textContent = branch.title;
-          }
-          timer = setTimeout(() => {
-            symbol.replaceChildren(icon);
-            branch.title = `Copy branch name: ${pr.branch}`;
-            feedback.textContent = '';
-          }, 2000);
-        });
+        clipboardFeedback(branch, { text: pr.branch, symbol, feedback, success: 'Branch name copied' });
         meta.append(branch);
       }
       if (pr.review !== 'NONE') {
@@ -470,14 +386,7 @@ function render() {
       time.dateTime = pr.updatedAt;
       time.title = `Updated ${new Date(pr.updatedAt).toLocaleString()}`;
       time.setAttribute('aria-label', `Updated ${age}`);
-      const clock = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-      for (const [key, value] of Object.entries({ viewBox: '0 0 16 16', width: '14', height: '14', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.5', 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'aria-hidden': 'true', focusable: 'false' })) clock.setAttribute(key, value);
-      const face = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-      face.setAttribute('cx', '8'); face.setAttribute('cy', '8'); face.setAttribute('r', '6');
-      const hands = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-      hands.setAttribute('d', 'M8 4v4l2.5 1.5');
-      clock.append(face, hands);
-      time.append(clock, document.createTextNode(age));
+      time.append(icon('clock', 14), document.createTextNode(age));
       const diffCounts = element('span', undefined, 'diff-counts');
       diffCounts.title = `${pr.additions} additions, ${pr.deletions} deletions`;
       diffCounts.setAttribute('aria-label', diffCounts.title);
@@ -487,12 +396,7 @@ function render() {
         const comments = element('span', undefined, 'comment-count');
         comments.title = `${pr.commentCount} ${pr.commentCount === 1 ? 'comment' : 'comments'}`;
         comments.setAttribute('aria-label', comments.title);
-        const bubble = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-        for (const [key, value] of Object.entries({ viewBox: '0 0 16 16', width: '14', height: '14', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.5', 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'aria-hidden': 'true', focusable: 'false' })) bubble.setAttribute(key, value);
-        const outline = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-        outline.setAttribute('d', 'M3 2.5h10a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1H7l-4 3v-3a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1Z');
-        bubble.append(outline);
-        comments.append(bubble, document.createTextNode(String(pr.commentCount)));
+        comments.append(icon('comment', 14), document.createTextNode(String(pr.commentCount)));
         meta.append(comments);
       }
       for (const label of pr.labels) meta.append(badge(label, 'label'));
@@ -551,8 +455,7 @@ function render() {
 async function load({ append = false, refresh = false } = {}) {
   if (!authenticated) return;
   clearTimeout(readinessTimer); readinessController?.abort();
-  controller?.abort(); controller = new AbortController();
-  const current = ++generation;
+  const request = loads.start();
   if (!append && !refresh) { items = []; total = 0; cursor = null; more = false; limited = false; }
   loading = true; $('error').hidden = true;
   if (refresh) {
@@ -566,21 +469,17 @@ async function load({ append = false, refresh = false } = {}) {
   if (append && cursor) query.set('cursor', cursor);
   if (refresh) query.set('refresh', '1');
   try {
-    const response = await apiFetch(`/api/pulls?${query}`, { signal: controller.signal });
+    const response = await apiFetch(`/api/pulls?${query}`, { signal: request.signal });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || 'Could not load pull requests.');
-    if (current !== generation) return;
-    const nextViewedKey = `gh-pull.viewed.v1:${data.viewer.toLowerCase()}`;
-    if (viewedKey !== nextViewedKey) {
-      viewedKey = nextViewedKey;
-      viewedUpdates = {};
+    if (!loads.isCurrent(request)) return;
+    if (viewedStore.selectAccount(data.viewer)) {
       titleEdits.clear();
       draftChanges.clear();
       merges.clear();
     }
     viewerLogin = data.viewer;
-    viewedUpdates = { ...viewedUpdates, ...readViewedUpdates() };
-    items = [...new Map([...(append ? items : []), ...data.items].map(pr => [pr.id, pr])).values()];
+    items = mergePullPages(items, data.items, append);
     nameColors = assignNameColors(items.flatMap(pr => [pr.author, ...(pr.reviewers ?? []).map(reviewer => reviewer.name)]), nameColors);
     try { localStorage.setItem(nameColorKey, JSON.stringify(nameColors)); } catch { /* Keep assignments stable for this session. */ }
     total = data.total; cursor = data.pageInfo.endCursor; more = data.pageInfo.hasNextPage;
@@ -588,13 +487,13 @@ async function load({ append = false, refresh = false } = {}) {
     if (limited && items.length >= 1000) more = false;
     $('updated').textContent = `Fetched ${new Date().toLocaleTimeString()}.`;
   } catch (error) {
-    if (current !== generation || error.name === 'AbortError') return;
+    if (!loads.isCurrent(request) || error.name === 'AbortError') return;
     $('error').replaceChildren(element('span', error.message + ' '));
     const retry = element('button', 'Retry'); retry.type = 'button';
     retry.addEventListener('click', () => load({ append, refresh: true }));
     $('error').append(retry); $('error').hidden = false;
   } finally {
-    if (current === generation) {
+    if (loads.isCurrent(request)) {
       loading = false;
       nextRefreshAt = Date.now() + refreshInterval;
       render();
@@ -669,7 +568,7 @@ $('logout').addEventListener('click', async () => {
     const response = await fetch('/auth/logout', { method: 'POST' });
     if (!response.ok) throw new Error();
     authenticated = false;
-    controller?.abort();
+    loads.cancel();
     location.replace('/');
   } catch {
     $('auth-notice').textContent = 'Could not sign out. Please retry.';
