@@ -1,0 +1,61 @@
+export function mergeOptions(pr, viewerLogin) {
+  const repo = pr.repository ?? {};
+  const methods = [['MERGE', repo.mergeCommitAllowed], ['SQUASH', repo.squashMergeAllowed], ['REBASE', repo.rebaseMergeAllowed]]
+    .filter(([, allowed]) => allowed).map(([method]) => method);
+  const checks = pr.commits?.nodes[0]?.commit.statusCheckRollup?.state;
+  // Review decisions can remain REVIEW_REQUIRED on a CLEAN PR; GitHub's merge
+  // status determines whether reviews actually block the merge.
+  const canMerge = Boolean(viewerLogin && pr.author?.login && pr.author.login.toLowerCase() === viewerLogin.toLowerCase()) && pr.state === 'OPEN' && pr.isDraft === false && pr.mergeable === 'MERGEABLE' &&
+    ['CLEAN', 'HAS_HOOKS'].includes(pr.mergeStateStatus) && !pr.mergeQueue && !pr.stackEntry &&
+    ['WRITE', 'MAINTAIN', 'ADMIN'].includes(repo.viewerPermission) &&
+    (!checks || checks === 'SUCCESS') && Boolean(pr.headRefOid) && methods.length > 0;
+  const mergePending = Boolean(viewerLogin && pr.author?.login?.toLowerCase() === viewerLogin.toLowerCase() && pr.state === 'OPEN' && !pr.isDraft &&
+    !pr.mergeQueue && !pr.stackEntry && ['WRITE', 'MAINTAIN', 'ADMIN'].includes(repo.viewerPermission) && methods.length &&
+    (pr.mergeable === 'UNKNOWN' || pr.mergeStateStatus === 'UNKNOWN'));
+  return { canMerge, mergePending, headOid: pr.headRefOid, mergeMethod: methods.includes(repo.viewerDefaultMergeMethod) ? repo.viewerDefaultMergeMethod : methods[0] };
+}
+
+function checkCountsFor(pr) {
+  const contexts = pr.commits?.nodes[0]?.commit.statusCheckRollup?.contexts;
+  if (!contexts) return null;
+  const counts = [...(contexts.checkRunCountsByState ?? []), ...(contexts.statusContextCountsByState ?? [])];
+  return {
+    passed: counts.filter(count => count.state === 'SUCCESS').reduce((sum, count) => sum + count.count, 0),
+    total: contexts.totalCount,
+  };
+}
+
+export function reviewersFor(pr) {
+  const reviewers = new Map();
+  for (const review of pr.latestReviews?.nodes ?? []) {
+    const name = review?.author?.login;
+    if (name && name !== pr.author?.login && review.state !== 'PENDING') {
+      reviewers.set(name, { name, state: review.state });
+    }
+  }
+  // A new request takes precedence over a previous review from the same person.
+  for (const request of pr.reviewRequests?.nodes ?? []) {
+    const reviewer = request?.requestedReviewer;
+    const name = reviewer?.login ?? (reviewer?.slug ? `${reviewer.organization.login}/${reviewer.slug}` : reviewer?.name);
+    if (name) reviewers.set(name, { name, state: 'REQUESTED' });
+  }
+  return [...reviewers.values()].sort((a, b) => a.name.localeCompare(b.name));
+}
+
+export function normalizePullRequest(pr, viewerLogin) {
+  return {
+    ...mergeOptions(pr, viewerLogin),
+    id: pr.id, number: pr.number, title: pr.title, url: pr.url, branch: pr.headRefName ?? '',
+    status: pr.state === 'OPEN' && pr.isDraft ? 'DRAFT' : pr.state,
+    author: pr.author?.login ?? 'deleted-user', repo: pr.repository.nameWithOwner,
+    createdAt: pr.createdAt, updatedAt: pr.updatedAt,
+    additions: pr.additions, deletions: pr.deletions,
+    commentCount: pr.totalCommentsCount ?? null,
+    review: pr.reviewDecision || 'NONE',
+    reviewers: reviewersFor(pr),
+    reviewersTruncated: Boolean(pr.reviewRequests?.pageInfo.hasNextPage || pr.latestReviews?.pageInfo.hasNextPage),
+    checks: pr.commits.nodes[0]?.commit.statusCheckRollup?.state ?? 'NONE',
+    checkCounts: checkCountsFor(pr),
+    labels: pr.labels.nodes.map(label => label.name),
+  };
+}
