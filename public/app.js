@@ -1,5 +1,6 @@
+import { createViewedStore, createLatestRequest, mergePullPages } from './state.js';
 import { element, icon, clipboardFeedback } from './ui.js';
-import { assignNameColors, NAME_COLOR_COUNT, groupPulls, labels, relativeTime, normalizeViewedUpdates, hasUnviewedUpdate } from './model.js';
+import { assignNameColors, NAME_COLOR_COUNT, groupPulls, labels, relativeTime } from './model.js';
 
 const $ = id => document.getElementById(id);
 const controls = ['scope', 'state', 'search', 'group', 'sort'];
@@ -8,7 +9,8 @@ for (const id of controls) {
   const input = $(id), value = params.get(id);
   if (value !== null && (id === 'search' || [...input.options].some(option => option.value === value))) input.value = value;
 }
-let items = [], total = 0, cursor = null, more = false, limited = false, loading = false, controller, generation = 0;
+let items = [], total = 0, cursor = null, more = false, limited = false, loading = false;
+const loads = createLatestRequest();
 const refreshInterval = 60_000;
 let nextRefreshAt = Date.now() + refreshInterval;
 let authMode = 'local', authenticated = false;
@@ -18,7 +20,7 @@ function scheduleMergeReadiness(attempt = 0) {
   clearTimeout(readinessTimer);
   readinessController?.abort();
   if (!authenticated || attempt >= 5 || !items.some(pr => pr.mergePending && pr.status === 'OPEN')) return;
-  const version = generation;
+  const version = loads.revision;
   readinessTimer = setTimeout(async () => {
     if (loading || titleEdits.size || [...draftChanges.values(), ...merges.values()].some(change => change.saving)) {
       scheduleMergeReadiness(attempt);
@@ -32,7 +34,7 @@ function scheduleMergeReadiness(attempt = 0) {
       const response = await apiFetch(`/api/pulls/readiness?${query}`, { signal: requestController.signal });
       if (!response.ok) throw new Error('Could not check merge readiness.');
       const data = await response.json();
-      if (version !== generation || requestController.signal.aborted || !authenticated) return;
+      if (version !== loads.revision || requestController.signal.aborted || !authenticated) return;
       for (const update of data.items) {
         const pr = items.find(item => item.id === update.id);
         // Never offer a merge against a commit that is not the displayed version.
@@ -40,7 +42,7 @@ function scheduleMergeReadiness(attempt = 0) {
       }
       if (!titleEdits.size) render();
     } catch { /* Normal refresh remains available if this short retry fails. */ }
-    if (version === generation && !requestController.signal.aborted) scheduleMergeReadiness(attempt + 1);
+    if (version === loads.revision && !requestController.signal.aborted) scheduleMergeReadiness(attempt + 1);
   }, 2000);
 }
 
@@ -73,12 +75,10 @@ let viewerLogin = '';
 const nameColorKey = 'gh-pull.name-colors.v1';
 let nameColors = assignNameColors([]);
 try { nameColors = assignNameColors([], JSON.parse(localStorage.getItem(nameColorKey))); } catch { /* Session colors still work if storage is unavailable. */ }
-let viewedKey = null, viewedUpdates = {};
-
-function readViewedUpdates() {
-  try { return normalizeViewedUpdates(JSON.parse(localStorage.getItem(viewedKey))); }
-  catch { return viewedUpdates; }
-}
+const viewedStore = createViewedStore({
+  getItem: key => localStorage.getItem(key),
+  setItem: (key, value) => localStorage.setItem(key, value),
+});
 
 function updateSummary() {
   const { count } = groupPulls(items, { search: $('search').value, group: $('group').value, sort: $('sort').value });
@@ -89,7 +89,7 @@ function updateTitleBrightness() {
   const byId = new Map(items.map(pr => [pr.id, pr]));
   for (const row of $('results').querySelectorAll('.pr-row')) {
     const pr = byId.get(row.dataset.prId);
-    const hasUpdates = pr && hasUnviewedUpdate(pr, viewedUpdates);
+    const hasUpdates = pr && viewedStore.hasUpdates(pr);
     row.classList.toggle('has-updates', Boolean(hasUpdates));
     if (pr) row.querySelector('.pr-title').setAttribute('aria-label', `${hasUpdates ? 'New updates: ' : ''}${pr.title} (opens in a new tab)`);
   }
@@ -97,22 +97,11 @@ function updateTitleBrightness() {
 }
 
 function markViewed(pr) {
-  const timestamp = Date.parse(pr.updatedAt);
-  if (!Number.isFinite(timestamp) || !viewedKey) return;
-  const saved = readViewedUpdates();
-  for (const [id, seen] of Object.entries(saved)) viewedUpdates[id] = Math.max(viewedUpdates[id] ?? 0, seen);
-  // Record the version actually shown, not the current time: a newer update may
-  // already exist on GitHub but not yet have reached this dashboard's cache.
-  viewedUpdates[pr.id] = Math.max(viewedUpdates[pr.id] ?? 0, timestamp);
-  try { localStorage.setItem(viewedKey, JSON.stringify(viewedUpdates)); } catch { /* Session-only tracking when storage is unavailable. */ }
-  updateTitleBrightness();
+  if (viewedStore.mark(pr)) updateTitleBrightness();
 }
 
 window.addEventListener('storage', event => {
-  if (viewedKey && (event.key === viewedKey || event.key === null)) {
-    viewedUpdates = readViewedUpdates();
-    updateTitleBrightness();
-  }
+  if (viewedStore.storageChanged(event.key)) updateTitleBrightness();
 });
 
 function badge(text, kind) { return element('span', text, `badge ${kind.toLowerCase()}`); }
@@ -268,7 +257,7 @@ function render() {
     for (const pr of prs) {
       const row = element('li', undefined, 'pr-row');
       row.dataset.prId = pr.id;
-      const hasUpdates = hasUnviewedUpdate(pr, viewedUpdates);
+      const hasUpdates = viewedStore.hasUpdates(pr);
       row.classList.toggle('has-updates', hasUpdates);
       const onOpen = event => {
         if ((event.type === 'click' && event.button === 0) || (event.type === 'auxclick' && event.button === 1)) {
@@ -466,8 +455,7 @@ function render() {
 async function load({ append = false, refresh = false } = {}) {
   if (!authenticated) return;
   clearTimeout(readinessTimer); readinessController?.abort();
-  controller?.abort(); controller = new AbortController();
-  const current = ++generation;
+  const request = loads.start();
   if (!append && !refresh) { items = []; total = 0; cursor = null; more = false; limited = false; }
   loading = true; $('error').hidden = true;
   if (refresh) {
@@ -481,21 +469,17 @@ async function load({ append = false, refresh = false } = {}) {
   if (append && cursor) query.set('cursor', cursor);
   if (refresh) query.set('refresh', '1');
   try {
-    const response = await apiFetch(`/api/pulls?${query}`, { signal: controller.signal });
+    const response = await apiFetch(`/api/pulls?${query}`, { signal: request.signal });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || 'Could not load pull requests.');
-    if (current !== generation) return;
-    const nextViewedKey = `gh-pull.viewed.v1:${data.viewer.toLowerCase()}`;
-    if (viewedKey !== nextViewedKey) {
-      viewedKey = nextViewedKey;
-      viewedUpdates = {};
+    if (!loads.isCurrent(request)) return;
+    if (viewedStore.selectAccount(data.viewer)) {
       titleEdits.clear();
       draftChanges.clear();
       merges.clear();
     }
     viewerLogin = data.viewer;
-    viewedUpdates = { ...viewedUpdates, ...readViewedUpdates() };
-    items = [...new Map([...(append ? items : []), ...data.items].map(pr => [pr.id, pr])).values()];
+    items = mergePullPages(items, data.items, append);
     nameColors = assignNameColors(items.flatMap(pr => [pr.author, ...(pr.reviewers ?? []).map(reviewer => reviewer.name)]), nameColors);
     try { localStorage.setItem(nameColorKey, JSON.stringify(nameColors)); } catch { /* Keep assignments stable for this session. */ }
     total = data.total; cursor = data.pageInfo.endCursor; more = data.pageInfo.hasNextPage;
@@ -503,13 +487,13 @@ async function load({ append = false, refresh = false } = {}) {
     if (limited && items.length >= 1000) more = false;
     $('updated').textContent = `Fetched ${new Date().toLocaleTimeString()}.`;
   } catch (error) {
-    if (current !== generation || error.name === 'AbortError') return;
+    if (!loads.isCurrent(request) || error.name === 'AbortError') return;
     $('error').replaceChildren(element('span', error.message + ' '));
     const retry = element('button', 'Retry'); retry.type = 'button';
     retry.addEventListener('click', () => load({ append, refresh: true }));
     $('error').append(retry); $('error').hidden = false;
   } finally {
-    if (current === generation) {
+    if (loads.isCurrent(request)) {
       loading = false;
       nextRefreshAt = Date.now() + refreshInterval;
       render();
@@ -584,7 +568,7 @@ $('logout').addEventListener('click', async () => {
     const response = await fetch('/auth/logout', { method: 'POST' });
     if (!response.ok) throw new Error();
     authenticated = false;
-    controller?.abort();
+    loads.cancel();
     location.replace('/');
   } catch {
     $('auth-notice').textContent = 'Could not sign out. Please retry.';
