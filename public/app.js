@@ -1,7 +1,7 @@
 import { createViewedStore, createLatestRequest, mergePullPages } from './state.js';
 import { element, icon, clipboardFeedback } from './ui.js';
 import { assignNameColors, NAME_COLOR_COUNT, groupPulls, labels, relativeTime } from './model.js';
-import { DEFAULT_QUERY, queryFromParams, queryPresets, setQueryPreset, normalizeQuery, queryError } from './query.js';
+import { queryFromParams, queryPresets, setQueryPreset, normalizeQuery, queryError } from './query.js';
 
 const $ = id => document.getElementById(id);
 const params = new URLSearchParams(location.search);
@@ -547,7 +547,6 @@ for (const id of ['scope', 'state', 'sort']) $(id).addEventListener('change', ()
   applyQuery();
 });
 $('group').addEventListener('change', () => { saveFilters(); render(); });
-$('query-reset').addEventListener('click', () => { queryEditor.setValue(DEFAULT_QUERY); applyQuery(); queryEditor.focus(); });
 $('refresh').addEventListener('click', () => load({ refresh: true }));
 $('more').addEventListener('click', () => load({ append: true }));
 setInterval(() => {

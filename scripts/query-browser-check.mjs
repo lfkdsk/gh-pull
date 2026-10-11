@@ -51,7 +51,7 @@ async function fixture(t, options = {}) {
   };
 }
 
-test('query presets, server search, grouping, custom values, reset and shareable URLs', async t => {
+test('query presets, server search, grouping, custom values and shareable URLs', async t => {
   const { page, editor, open, submit, calls, errors, origin } = await fixture(t);
   await open();
   assert.equal(await editor.innerText(), DEFAULT_QUERY);
@@ -89,7 +89,7 @@ test('query presets, server search, grouping, custom values, reset and shareable
   await submit('no-results');
   await page.locator('.empty').waitFor();
   assert.equal(calls.at(-1).query, 'is:pr no-results');
-  await page.click('#query-reset');
+  await submit(DEFAULT_QUERY);
   await page.locator('.pr-row').first().waitFor();
   assert.equal(await editor.innerText(), DEFAULT_QUERY);
   await page.goto(`${origin}/?scope=authored&state=all&sort=oldest&search=keyboard`);
