@@ -15,9 +15,10 @@ async function fixture(t) {
     headOid: 'a'.repeat(40), mergeMethod: 'SQUASH',
   };
   let reject = false, hour = 1, hold, release;
-  const list = async () => {
+  const list = async ({ query = '' } = {}) => {
     if (hold) await hold;
-    return { viewer: 'alice', total: 1, items: [{ ...pr }], pageInfo: { hasNextPage: false } };
+    const items = query.includes('does-not-exist') ? [] : [{ ...pr }];
+    return { viewer: 'alice', total: items.length, items, pageInfo: { hasNextPage: false } };
   };
   list.mergeReadiness = async () => ({ items: [] });
   const update = fields => {
@@ -126,9 +127,10 @@ test('clipboard, filters, background refresh, icons and responsive metadata styl
     await page.selectOption('#scope', scope);
     assert.equal(await page.locator('#scope').inputValue(), scope);
   }
-  await page.fill('#search', 'does-not-exist');
+  await page.locator('.cm-content').fill('is:pr does-not-exist');
+  await page.click('#query-submit');
   await page.waitForFunction(() => !document.querySelector('.pr-row'));
-  await page.fill('#search', ''); await page.locator('.pr-row').waitFor();
+  await page.locator('.cm-content').fill('is:pr'); await page.click('#query-submit'); await page.locator('.pr-row').waitFor();
   f.holdRefresh(); await page.click('#refresh');
   assert.equal(await page.locator('#refresh').isDisabled(), true);
   assert.equal(await page.locator('.pr-row').count(), 1);

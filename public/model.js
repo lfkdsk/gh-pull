@@ -67,7 +67,7 @@ export function assignNameColors(usernames, previous = {}) {
 export function groupPulls(items, { search = '', group = 'repo', sort = 'updated' } = {}) {
   const query = search.trim().toLowerCase();
   const selected = items.filter(pr => [pr.title, pr.repo, pr.author, `#${pr.number}`, ...pr.labels].join(' ').toLowerCase().includes(query));
-  selected.sort((a, b) => sort === 'oldest' ? a.createdAt.localeCompare(b.createdAt) :
+  if (sort !== 'query') selected.sort((a, b) => sort === 'oldest' ? a.createdAt.localeCompare(b.createdAt) :
     sort === 'created' ? b.createdAt.localeCompare(a.createdAt) : b.updatedAt.localeCompare(a.updatedAt));
   const groups = new Map();
   for (const pr of selected) {
