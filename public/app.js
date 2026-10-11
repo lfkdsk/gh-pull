@@ -2,7 +2,6 @@ import { createViewedStore, createLatestRequest, mergePullPages } from './state.
 import { element, icon, clipboardFeedback } from './ui.js';
 import { assignNameColors, NAME_COLOR_COUNT, groupPulls, labels, relativeTime } from './model.js';
 import { DEFAULT_QUERY, queryFromParams, queryPresets, setQueryPreset, normalizeQuery, queryError } from './query.js';
-import { createQueryEditor } from './query-editor.js';
 
 const $ = id => document.getElementById(id);
 const params = new URLSearchParams(location.search);
@@ -452,7 +451,7 @@ function render() {
 }
 
 async function load({ append = false, refresh = false } = {}) {
-  if (!authenticated) return;
+  if (!authenticated || !queryEditor) return;
   if (queryError(appliedQuery)) {
     updateQueryControls();
     $('summary').textContent = 'Enter a valid query to load pull requests.';
@@ -512,15 +511,22 @@ function saveFilters() {
   const query = new URLSearchParams({ q: appliedQuery, group: $('group').value });
   history.replaceState(null, '', `?${query}`);
 }
-const queryEditor = createQueryEditor({
-  parent: $('query-editor'), value: appliedQuery, getItems: () => items,
-  onChange: updateQueryControls, onSubmit: applyQuery,
-});
+let queryEditor;
+async function initializeQueryEditor() {
+  if (queryEditor) return;
+  const { createQueryEditor } = await import('./query-editor.js');
+  queryEditor = createQueryEditor({
+    parent: $('query-editor'), value: appliedQuery, getItems: () => items,
+    onChange: updateQueryControls, onSubmit: applyQuery,
+  });
+  updateQueryControls();
+}
 function updateQueryControls() {
   const value = queryEditor.value;
   for (const [control, preset] of Object.entries(queryPresets(value))) $(control).value = preset;
   const error = queryError(value);
-  $('query-feedback').textContent = error || (value !== appliedQuery ? 'Query changed — press Enter or Search to apply.' : '');
+  const feedback = error || (value !== appliedQuery ? 'Query changed — press Enter or Search to apply.' : '');
+  if ($('query-feedback').textContent !== feedback) $('query-feedback').textContent = feedback;
   $('query-feedback').hidden = !$('query-feedback').textContent;
   $('query-feedback').classList.toggle('query-error', Boolean(error));
   $('query-editor').classList.toggle('invalid', Boolean(error));
@@ -535,7 +541,6 @@ function applyQuery() {
   updateQueryControls(); saveFilters();
   load({ refresh: !changed });
 }
-updateQueryControls();
 $('filters').addEventListener('submit', event => { event.preventDefault(); applyQuery(); });
 for (const id of ['scope', 'state', 'sort']) $(id).addEventListener('change', () => {
   queryEditor.setValue(setQueryPreset(queryEditor.value, id, $(id).value));
@@ -576,7 +581,7 @@ async function initializeSession() {
     authMode = session.mode;
     authenticated = session.authenticated;
     $('signin').hidden = authenticated;
-    $('dashboard').hidden = !authenticated;
+    $('dashboard').hidden = true;
     $('links-hint').hidden = !authenticated;
     $('refresh').hidden = !authenticated;
     $('logout').hidden = authMode !== 'github-app' || !authenticated;
@@ -587,8 +592,16 @@ async function initializeSession() {
     $('auth-notice').hidden = !notice;
     if (notice) $('auth-notice').textContent = notice;
     $('session-status').hidden = true;
-    if (authenticated) await load();
+    if (authenticated) {
+      await initializeQueryEditor();
+      $('dashboard').hidden = false;
+      await load();
+    }
   } catch {
+    authenticated = false;
+    $('dashboard').hidden = true;
+    $('refresh').hidden = true;
+    $('session-status').hidden = false;
     $('session-status').textContent = 'Could not connect. Please retry.';
     $('session-retry').hidden = false;
   }

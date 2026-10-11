@@ -1,3 +1,11 @@
+CodeMirror query editor and bundled dependencies
+https://codemirror.net/
+
+MIT licenses and copyright notices are included in
+public/query-editor.LICENSE.txt, alongside the generated browser bundle.
+
+---
+
 GitHub Octicons file-diff icon
 https://github.com/primer/octicons
 

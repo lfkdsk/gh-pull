@@ -1,8 +1,8 @@
 import { EditorState, Prec } from '@codemirror/state';
 import { EditorView, Decoration, ViewPlugin, keymap, placeholder } from '@codemirror/view';
 import { history, historyKeymap, defaultKeymap } from '@codemirror/commands';
-import { autocompletion, completionKeymap, acceptCompletion, closeCompletion, startCompletion } from '@codemirror/autocomplete';
-import { tokenizeQuery, queryCompletions } from '../public/query.js';
+import { autocompletion, completionKeymap, acceptCompletion, closeCompletion } from '@codemirror/autocomplete';
+import { tokenizeQuery, queryCompletions, queryError } from '../public/query.js';
 
 function highlights(view) {
   const marks = [];
@@ -21,7 +21,7 @@ export function createQueryEditor({ parent, value, onChange, onSubmit, getItems 
     state: EditorState.create({ doc: value, extensions: [
       EditorView.cspNonce.of(document.querySelector('meta[name="style-nonce"]').content),
       EditorView.lineWrapping,
-      EditorView.contentAttributes.of({ role: 'textbox', 'aria-label': 'Search pull requests', 'aria-describedby': 'query-help query-feedback', 'aria-multiline': 'false', autocapitalize: 'off', spellcheck: 'false' }),
+      EditorView.contentAttributes.of(view => ({ role: 'textbox', 'aria-label': 'Search pull requests', 'aria-describedby': 'query-help query-feedback', 'aria-multiline': 'false', 'aria-invalid': String(Boolean(queryError(view.state.doc.toString()))), autocapitalize: 'off', spellcheck: 'false' })),
       placeholder('is:pr is:open involves:@me'),
       history(),
       EditorState.transactionFilter.of(tr => {
@@ -36,7 +36,8 @@ export function createQueryEditor({ parent, value, onChange, onSubmit, getItems 
       }, { decorations: plugin => plugin.decorations }),
       autocompletion({
         override: [context => queryCompletions(context.state.doc.toString(), context.pos, getItems(), context.explicit)],
-        activateOnTypingDelay: 80, interactionDelay: 0, defaultKeymap: false,
+        activateOnTypingDelay: 80, interactionDelay: 0, defaultKeymap: false, icons: false,
+        activateOnCompletion: completion => completion.label.endsWith(':'),
       }),
       Prec.highest(keymap.of([
         { key: 'Enter', run(view) { if (!acceptCompletion(view)) onSubmit(); return true; } },
@@ -54,6 +55,5 @@ export function createQueryEditor({ parent, value, onChange, onSubmit, getItems 
       if (next !== editor.state.doc.toString()) editor.dispatch({ changes: { from: 0, to: editor.state.doc.length, insert: next } });
     },
     focus() { editor.focus(); },
-    complete() { editor.focus(); startCompletion(editor); },
   };
 }

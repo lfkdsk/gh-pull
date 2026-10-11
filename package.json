@@ -13,10 +13,11 @@
     "dev": "node --watch server.js",
     "test": "node --test",
     "check": "node --check server.js && node --check auth.js && node --check github.js && node --check github-client.js && node --check pull-request.js && node --check installation.js && node --check marketplace.js && node --check public/app.js && node --check public/model.js && node --check public/ui.js && node --check public/state.js && node --check public/query.js && node --check scripts/query-editor.js",
-    "test:browser": "node --test scripts/browser-check.mjs",
+    "test:browser": "node --test scripts/*browser-check.mjs",
     "build:editor": "node scripts/build-query-editor.mjs"
   },
   "devDependencies": {
+    "@axe-core/playwright": "4.13.0",
     "@codemirror/autocomplete": "6.20.3",
     "@codemirror/commands": "6.11.1",
     "@codemirror/state": "6.7.6",

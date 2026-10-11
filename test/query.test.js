@@ -103,7 +103,8 @@ test('query HTTP cache isolates searches and cursors, refresh bypasses it, inval
   const html = await page.text();
   const nonce = /name="style-nonce" content="([^"]+)"/.exec(html)[1];
   assert.ok(page.headers.get('content-security-policy').includes(`'nonce-${nonce}'`));
-  assert.ok(!page.headers.get('content-security-policy').includes('unsafe-inline'));
+  assert.match(page.headers.get('content-security-policy'), /script-src 'self';/);
+  assert.match(page.headers.get('content-security-policy'), /style-src 'self' 'nonce-[^']+';/);
   assert.ok(!html.includes('STYLE_NONCE'));
   for (const asset of ['query.js', 'query-editor.js', 'query-editor.LICENSE.txt']) assert.equal((await fetch(`${origin}/${asset}`)).status, 200);
 });

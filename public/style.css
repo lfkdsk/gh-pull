@@ -62,12 +62,12 @@ button, summary { cursor: pointer; }
 #query-reset:hover { color: light-dark(#0969da, #58a6ff); }
 #query-feedback { margin: 5px 0 0; }
 #query-feedback.query-error { color: light-dark(#cf222e, #f85149); }
-.cm-tooltip.cm-tooltip-autocomplete { border: 1px solid light-dark(#d1d9e0, #3d444d); border-radius: 8px; background: light-dark(#ffffff, #161b22); color: light-dark(#1f2328, #e6edf3); box-shadow: 0 8px 24px #0003; overflow: hidden; max-width: calc(100vw - 24px); }
-.cm-tooltip.cm-tooltip-autocomplete > ul { font: 13px/1.5 system-ui, sans-serif; max-width: min(440px, calc(100vw - 24px)); padding: 4px; }
-.cm-tooltip.cm-tooltip-autocomplete > ul > li { padding: 6px 8px; border: 0; border-radius: 4px; }
-.cm-tooltip.cm-tooltip-autocomplete > ul > li[aria-selected] { background: light-dark(#ddf4ff, #26374c); color: inherit; }
-.cm-completionDetail { color: light-dark(#59636e, #a7b1bd); font-style: normal; }
-.cm-completionMatchedText { text-decoration: none; font-weight: 650; }
+#query-editor .cm-tooltip.cm-tooltip-autocomplete { border: 1px solid light-dark(#d1d9e0, #3d444d); border-radius: 8px; background: light-dark(#ffffff, #161b22); color: light-dark(#1f2328, #e6edf3); box-shadow: 0 8px 24px #0003; overflow: hidden; max-width: calc(100vw - 24px); }
+#query-editor .cm-tooltip.cm-tooltip-autocomplete > ul { font: 13px/1.5 system-ui, sans-serif; max-width: min(440px, calc(100vw - 24px)); max-height: min(280px, 45vh); padding: 4px; }
+#query-editor .cm-tooltip.cm-tooltip-autocomplete > ul > li { padding: 6px 8px; border: 0; border-radius: 4px; }
+#query-editor .cm-tooltip.cm-tooltip-autocomplete > ul > li[aria-selected] { background: light-dark(#ddf4ff, #26374c); color: inherit; }
+#query-editor .cm-completionDetail { color: light-dark(#59636e, #a7b1bd); font-style: normal; }
+#query-editor .cm-completionMatchedText { text-decoration: none; font-weight: 650; }
 .hint, #summary { color: light-dark(#59636e, #a7b1bd); font-size: 13px; }
 .dashboard-footer { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px 16px; margin-top: 13px; }
 .footer-links { margin-left: auto; text-align: right; }

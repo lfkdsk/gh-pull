@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { chromium } from 'playwright';
-import { createApp } from '../server.js';
+import { browserFixture } from './browser-fixture.mjs';
 import { ApiError } from '../github.js';
 
 async function fixture(t) {
@@ -27,23 +26,14 @@ async function fixture(t) {
     return { ...pr };
   };
   // Every action is implemented by this fixture. Nothing calls GitHub or gh CLI.
-  const server = createApp({
+  const { page, origin, errors } = await browserFixture(t, {
     list,
     updateTitle: async ({ title }) => update({ title }),
     convertToDraft: async () => update({ status: 'DRAFT', canMerge: false }),
     markReadyForReview: async () => update({ status: 'OPEN', canMerge: true }),
     merge: async () => update({ status: 'MERGED', canMerge: false }),
   });
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-  t.after(() => new Promise(resolve => { release?.(); server.close(resolve); server.closeAllConnections(); }));
-  const browser = await chromium.launch({ executablePath: process.env.CHROME_BIN || undefined });
-  t.after(() => browser.close());
-  const page = await browser.newPage();
-  page.setDefaultTimeout(5000);
-  const origin = `http://127.0.0.1:${server.address().port}`;
-  const errors = [];
-  page.on('pageerror', error => errors.push(error.message));
-  await page.route('**/*', route => new URL(route.request().url()).origin === origin ? route.continue() : route.abort());
+  t.after(() => release?.());
   await page.addInitScript(() => {
     window.copiedText = null;
     Object.defineProperty(navigator, 'clipboard', { value: { writeText: async text => {

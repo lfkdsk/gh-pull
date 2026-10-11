@@ -122,10 +122,11 @@ export function createApp({ list = createGitHub(), updateTitle = list.updateTitl
       if (!asset) return send(404, { error: 'Not found.' });
       let body = await readFile(new URL(`./public/${asset[0]}`, import.meta.url));
       if (url.pathname === '/') {
-        // CodeMirror mounts its own style sheets. Authorize those sheets without
-        // allowing arbitrary inline styles or weakening script-src.
+        // CodeMirror mounts nonce-authorized style sheets. Browsers also copy
+        // token colors into style attributes while editing contenteditable text.
+        // Allow those attributes only; scripts and style sheets stay restricted.
         const nonce = randomBytes(18).toString('base64');
-        res.setHeader('Content-Security-Policy', res.getHeader('Content-Security-Policy').replace("style-src 'self'", `style-src 'self' 'nonce-${nonce}'`));
+        res.setHeader('Content-Security-Policy', res.getHeader('Content-Security-Policy').replace("style-src 'self'", `style-src 'self' 'nonce-${nonce}'; style-src-attr 'unsafe-inline'`));
         body = body.toString('utf8').replace('STYLE_NONCE', nonce);
       }
       res.writeHead(200, { 'Content-Type': `${asset[1]}; charset=utf-8` });
