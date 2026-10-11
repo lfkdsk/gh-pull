@@ -248,6 +248,7 @@ function titleEditor(pr) {
       const current = items.find(item => item.id === pr.id);
       if (current) { current.title = data.title; current.updatedAt = data.updatedAt; }
       titleEdits.delete(pr.id); render();
+      markViewed({ id: pr.id, updatedAt: data.updatedAt });
       $('summary').append(document.createTextNode(' · Title updated'));
       focusTitleControl(pr.id, '.edit-title');
     } catch (error) {
