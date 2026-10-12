@@ -193,6 +193,36 @@ window.addEventListener('storage', event => {
 
 function badge(text, kind) { return element('span', text, `badge ${kind.toLowerCase()}`); }
 
+// Keep merge availability, pending state, and app-access messaging together.
+function createMergeAction(pr) {
+  if (pr.status !== 'OPEN' || !pr.canMerge || pr.author.toLowerCase() !== viewerLogin.toLowerCase()) return null;
+  const actions = document.createDocumentFragment();
+  const method = { MERGE: 'Merge', SQUASH: 'Squash and merge', REBASE: 'Rebase and merge' }[pr.mergeMethod];
+  const merge = element('button', merges.get(pr.id)?.saving ? 'Merging…' : method, 'badge open merge-action');
+  merge.type = 'button';
+  merge.setAttribute('aria-label', `${method} ${pr.repo} #${pr.number}`);
+  const blockedAccess = authMode === 'github-app' && !pr.mergeAccess?.allowed;
+  merge.disabled = blockedAccess || Boolean(merges.get(pr.id)?.saving || draftChanges.get(pr.id)?.saving || titleEdits.has(pr.id));
+  merge.addEventListener('click', () => mergePull(pr));
+  if (blockedAccess) {
+    const message = pr.mergeAccess?.message || 'Could not verify app access. Refresh to try again.';
+    const control = element('span', undefined, 'merge-access-blocked');
+    control.setAttribute('role', 'group');
+    control.title = message;
+    control.tabIndex = 0;
+    control.setAttribute('aria-label', `${method} unavailable. ${message}`);
+    control.append(merge); actions.append(control);
+    if (pr.mergeAccess?.url) {
+      const install = element('a', pr.mergeAccess.action, 'merge-access-link');
+      install.href = pr.mergeAccess.url;
+      install.target = '_blank'; install.rel = 'noopener noreferrer';
+      install.title = 'Complete setup on GitHub, then refresh this page. Organization access may require owner approval.';
+      actions.append(install);
+    }
+  } else actions.append(merge);
+  return actions;
+}
+
 function usernameLink(username, className = '') {
   // Team names and the missing-author placeholder are not user profiles.
   if (username === 'deleted-user' || !/^[a-z\d](?:[a-z\d-]*[a-z\d])?$/i.test(username)) return element('span', username, className);
@@ -416,31 +446,8 @@ function render() {
         });
         line.append(edit);
       }
-      if (pr.status === 'OPEN' && pr.canMerge && pr.author.toLowerCase() === viewerLogin.toLowerCase()) {
-        const method = { MERGE: 'Merge', SQUASH: 'Squash and merge', REBASE: 'Rebase and merge' }[pr.mergeMethod];
-        const merge = element('button', merges.get(pr.id)?.saving ? 'Merging…' : method, 'badge open merge-action');
-        merge.type = 'button';
-        merge.setAttribute('aria-label', `${method} ${pr.repo} #${pr.number}`);
-        const blockedAccess = authMode === 'github-app' && !pr.mergeAccess?.allowed;
-        merge.disabled = blockedAccess || Boolean(merges.get(pr.id)?.saving || draftChanges.get(pr.id)?.saving || titleEdits.has(pr.id));
-        merge.addEventListener('click', () => mergePull(pr));
-        if (blockedAccess) {
-          const message = pr.mergeAccess?.message || 'Could not verify app access. Refresh to try again.';
-          const control = element('span', undefined, 'merge-access-blocked');
-          control.setAttribute('role', 'group');
-          control.title = message;
-          control.tabIndex = 0;
-          control.setAttribute('aria-label', `${method} unavailable. ${message}`);
-          control.append(merge); line.append(control);
-          if (pr.mergeAccess?.url) {
-            const install = element('a', pr.mergeAccess.action, 'merge-access-link');
-            install.href = pr.mergeAccess.url;
-            install.target = '_blank'; install.rel = 'noopener noreferrer';
-            install.title = 'Complete setup on GitHub, then refresh this page. Organization access may require owner approval.';
-            line.append(install);
-          }
-        } else line.append(merge);
-      }
+      const mergeAction = createMergeAction(pr);
+      if (mergeAction) line.append(mergeAction);
       const meta = element('div', undefined, 'meta');
       let checks = badge(labels[pr.checks] ?? pr.checks, pr.checks);
       if (pr.checks === 'PENDING' && pr.checkCounts?.total > 0) {
