@@ -601,6 +601,7 @@ button, .pr-group > summary {
 }
 
 .pr-files {
+  text-decoration: none;
   gap: 4px;
   width: auto;
   min-width: 24px;
