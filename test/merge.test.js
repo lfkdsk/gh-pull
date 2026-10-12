@@ -135,7 +135,7 @@ test('merge readiness reads current GitHub state and keeps commit pinning and ow
   assert.equal(second.items.length, 2);
 });
 
-test('readiness endpoint validates IDs and bypasses the PR list cache', async t => {
+test('readiness endpoint validates IDs and shares its own short-lived cache', async t => {
   let calls = 0;
   const list = async () => ({ items: [] });
   list.mergeReadiness = async ids => { calls++; return { items: ids.map(id => ({ id, ...mergeOptions(ready, 'alice') })) }; };
@@ -152,7 +152,7 @@ test('readiness endpoint validates IDs and bypasses the PR list cache', async t 
     assert.equal(result.status, 200);
     assert.equal((await result.json()).items[0].canMerge, true);
   }
-  assert.equal(calls, 2);
+  assert.equal(calls, 1);
   assert.equal((await fetch(base + '?id=PR_1', { headers: { Origin: 'https://evil.example' } })).status, 403);
 });
 

@@ -438,3 +438,47 @@ test('file and comment totals are fetched for authored and search views, preserv
     assert.deepEqual(items.map(pr => pr.changedFiles), [8, 0, null]);
   }
 });
+
+test('status polling fetches current PR nodes, counts, and merge metadata without searching', async () => {
+  let request;
+  const list = createGitHub({ getToken: async () => 'fixture', fetchImpl: async (url, options) => {
+    request = JSON.parse(options.body);
+    return Response.json({ data: { viewer: { login: 'alice' }, nodes: [null, node({
+      id: 'active', commits: { nodes: [{ commit: { statusCheckRollup: { state: 'PENDING', contexts: {
+        totalCount: 8, checkRunCountsByState: [{ state: 'SUCCESS', count: 1 }], statusContextCountsByState: [],
+      } } } }] },
+    })] } });
+  } });
+  const result = await list.status(['active', 'deleted']);
+  assert.deepEqual(request.variables, { ids: ['active', 'deleted'] });
+  assert.match(request.query, /nodes\(ids: \$ids\)/);
+  assert.doesNotMatch(request.query, /search\(/);
+  assert.equal(result.items.length, 1);
+  assert.equal(result.items[0].checks, 'PENDING');
+  assert.deepEqual(result.items[0].checkCounts, { passed: 1, total: 8 });
+});
+
+test('status endpoint validates IDs, shares batches, invalidates stale searches and propagates cooldowns', async t => {
+  let lists = 0, statuses = 0, throttled = false;
+  const list = async () => { lists++; return { items: [] }; };
+  list.status = async ids => {
+    statuses++;
+    if (throttled) { const error = new ApiError('Rate limit', 429); error.retryAfter = 120; throw error; }
+    return { items: ids.map(id => ({ id })) };
+  };
+  const base = await server(t, list);
+  await fetch(base + '/api/pulls'); await fetch(base + '/api/pulls');
+  assert.equal(lists, 1);
+  for (const suffix of ['', '?id=', '?' + Array(51).fill('id=one').join('&')]) {
+    assert.equal((await fetch(base + '/api/pulls/status' + suffix)).status, 400);
+  }
+  await fetch(base + '/api/pulls/status?id=one&id=two');
+  await fetch(base + '/api/pulls/status?id=two&id=one');
+  assert.equal(statuses, 1);
+  await fetch(base + '/api/pulls'); assert.equal(lists, 2);
+  assert.equal((await fetch(base + '/api/pulls/status?id=one', { headers: { Origin: 'https://evil.example' } })).status, 403);
+  throttled = true;
+  const response = await fetch(base + '/api/pulls/status?id=three');
+  assert.equal(response.status, 429);
+  assert.equal(response.headers.get('retry-after'), '120');
+});

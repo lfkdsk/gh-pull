@@ -1,3 +1,4 @@
+import { createPollingSchedule, pendingPulls } from './polling.js';
 import { createViewedStore, createLatestRequest, mergePullPages } from './state.js';
 import { element, icon, clipboardFeedback } from './ui.js';
 import { assignNameColors, NAME_COLOR_COUNT, groupPulls, labels, relativeTime } from './model.js';
@@ -10,18 +11,19 @@ let appliedQuery = queryFromParams(params);
 if (!queryError(appliedQuery)) appliedQuery = normalizeQuery(appliedQuery);
 let items = [], total = 0, cursor = null, more = false, limited = false, loading = false;
 const loads = createLatestRequest();
-const refreshInterval = 60_000;
-let nextRefreshAt = Date.now() + refreshInterval;
+const polling = createPollingSchedule();
+let statusLoading = false, statusController, statusOffset = 0, loadedPages = 1;
+let events;
 let authMode = 'local', authenticated = false;
 let readinessTimer, readinessController;
 
 function scheduleMergeReadiness(attempt = 0) {
   clearTimeout(readinessTimer);
   readinessController?.abort();
-  if (!authenticated || attempt >= 5 || !items.some(pr => pr.mergePending && pr.status === 'OPEN')) return;
+  if (polling.backingOff || document.hidden || !navigator.onLine || !authenticated || attempt >= 5 || !items.some(pr => pr.mergePending && pr.status === 'OPEN')) return;
   const version = loads.revision;
   readinessTimer = setTimeout(async () => {
-    if (loading || titleEdits.size || [...draftChanges.values(), ...merges.values()].some(change => change.saving)) {
+    if (polling.backingOff || statusLoading || document.hidden || !navigator.onLine || loading || titleEdits.size || [...draftChanges.values(), ...merges.values()].some(change => change.saving)) {
       scheduleMergeReadiness(attempt);
       return;
     }
@@ -31,16 +33,19 @@ function scheduleMergeReadiness(attempt = 0) {
     readinessController = requestController;
     try {
       const response = await apiFetch(`/api/pulls/readiness?${query}`, { signal: requestController.signal });
-      if (!response.ok) throw new Error('Could not check merge readiness.');
+      if (!response.ok) throw responseError(response, await response.json(), 'Could not check merge readiness.');
       const data = await response.json();
-      if (version !== loads.revision || requestController.signal.aborted || !authenticated) return;
+      if (version !== loads.revision || requestController.signal.aborted || !authenticated || editingPull()) return;
       for (const update of data.items) {
         const pr = items.find(item => item.id === update.id);
         // Never offer a merge against a commit that is not the displayed version.
         if (pr?.status === 'OPEN' && pr.headOid === update.headOid) Object.assign(pr, update);
       }
       if (!titleEdits.size) render();
-    } catch { /* Normal refresh remains available if this short retry fails. */ }
+    } catch (error) {
+      if (error.retryAfter) polling.failed(error.retryAfter);
+      // Normal polling retries unresolved merge readiness.
+    }
     if (version === loads.revision && !requestController.signal.aborted) scheduleMergeReadiness(attempt + 1);
   }, 2000);
 }
@@ -58,14 +63,91 @@ async function apiFetch(url, options) {
 }
 
 function updateRefreshButton() {
-  $('refresh').disabled = loading;
-  const seconds = Math.max(0, Math.ceil((nextRefreshAt - Date.now()) / 1000));
-  $('refresh-countdown').textContent = loading ? '…' : String(seconds);
-  const label = loading ? 'Refreshing…' : `Refresh (auto refresh in ${seconds}s)`;
+  const busy = loading || statusLoading;
+  $('refresh').disabled = busy;
+  const paused = document.hidden || !navigator.onLine;
+  const seconds = Math.max(0, Math.ceil((polling.nextAt(pendingPulls(items).length > 0) - Date.now()) / 1000));
+  $('refresh-countdown').textContent = busy ? '…' : paused ? 'Ⅱ' : String(seconds);
+  const label = busy ? 'Refreshing…' : paused ? 'Refresh (auto refresh paused)' : `Refresh (auto refresh in ${seconds}s)`;
   $('refresh').title = label;
   $('refresh').setAttribute('aria-label', label);
-  $('refresh').setAttribute('aria-busy', String(loading));
+  $('refresh').setAttribute('aria-busy', String(busy));
 }
+
+function editingPull() {
+  return titleEdits.size || [...draftChanges.values(), ...merges.values()].some(change => change.saving);
+}
+function responseError(response, data, fallback) {
+  const error = new Error(data.error || fallback);
+  error.retryAfter = Number(response.headers.get('Retry-After')) || 0;
+  return error;
+}
+
+async function refreshStatus() {
+  const pending = pendingPulls(items);
+  if (!pending.length) return;
+  // Rotate batches so large dashboards do not starve later PRs.
+  statusOffset %= pending.length;
+  const selected = [...pending.slice(statusOffset), ...pending.slice(0, statusOffset)].slice(0, 50);
+  statusOffset += selected.length;
+  const version = loads.revision;
+  const controller = new AbortController(); statusController = controller;
+  statusLoading = true; updateRefreshButton();
+  clearTimeout(readinessTimer); readinessController?.abort();
+  try {
+    const query = new URLSearchParams(selected.map(pr => ['id', pr.id]));
+    const response = await apiFetch(`/api/pulls/status?${query}`, { signal: AbortSignal.any([controller.signal, AbortSignal.timeout(35_000)]) });
+    const data = await response.json();
+    if (!response.ok) throw responseError(response, data, 'Could not refresh running checks.');
+    if (version !== loads.revision || controller.signal.aborted || !authenticated) return;
+    polling.succeeded('status');
+    // Edits may start while the request is in flight. Never replace those controls.
+    if (editingPull()) return;
+    let changed = false, reconcile = false;
+    for (const update of data.items) {
+      const current = items.find(pr => pr.id === update.id);
+      if (!current || Date.parse(update.updatedAt) < Date.parse(current.updatedAt)) continue;
+      if (JSON.stringify(current) !== JSON.stringify(update)) {
+        reconcile ||= ['status', 'checks', 'review'].some(key => current[key] !== update[key]);
+        Object.assign(current, update); changed = true;
+      }
+    }
+    if (reconcile) polling.invalidate();
+    if (changed) render();
+    $('updated').textContent = `Checked ${new Date().toLocaleTimeString()}.`;
+  } catch (error) {
+    if (controller.signal.aborted || version !== loads.revision) return;
+    polling.failed(error.retryAfter);
+    $('updated').textContent = 'Background refresh failed. Retrying automatically.';
+  } finally {
+    if (statusController === controller) { statusLoading = false; updateRefreshButton(); }
+  }
+}
+
+function poll() {
+  if (!authenticated || !queryEditor || queryError(appliedQuery)) return;
+  const kind = polling.due({ visible: !document.hidden, online: navigator.onLine,
+    busy: loading || statusLoading || Boolean(editingPull()), pending: pendingPulls(items).length > 0 });
+  if (kind === 'list') load({ refresh: true, background: true });
+  else if (kind === 'status') refreshStatus();
+  updateRefreshButton();
+}
+
+function syncActivity() {
+  if (document.hidden || !navigator.onLine || !authenticated) {
+    events?.close(); events = null;
+    clearTimeout(readinessTimer); readinessController?.abort();
+    statusController?.abort();
+  } else {
+    if (!events) {
+      events = new EventSource('/api/events');
+      events.addEventListener('invalidate', () => { polling.invalidate(); poll(); });
+    }
+    poll();
+  }
+  updateRefreshButton();
+}
+
 const collapsed = new Set();
 const titleEdits = new Map();
 const draftChanges = new Map();
@@ -139,6 +221,10 @@ const changeMessages = {
 async function changePull(pr, changes, { action, input = {}, apply, message, onSuccess, onError }) {
   const change = changes.get(pr.id) ?? {};
   if (change.saving) return;
+  // An older read must not overwrite the mutation's confirmed result.
+  loads.cancel(); loading = false;
+  statusController?.abort(); statusLoading = false;
+  clearTimeout(readinessTimer); readinessController?.abort();
   change.saving = true; change.error = '';
   changes.set(pr.id, change); render();
   const messages = changeMessages[action] ?? changeMessages.status;
@@ -153,6 +239,7 @@ async function changePull(pr, changes, { action, input = {}, apply, message, onS
     changes.delete(pr.id); render();
     markViewed({ id: pr.id, updatedAt: data.updatedAt });
     $('summary').append(document.createTextNode(` · ${message}`));
+    polling.invalidate();
     onSuccess?.();
   } catch (error) {
     change.saving = false;
@@ -454,18 +541,20 @@ function render() {
   updateRefreshButton();
 }
 
-async function load({ append = false, refresh = false } = {}) {
+async function load({ append = false, refresh = false, background = false } = {}) {
   if (!authenticated || !queryEditor) return;
   if (queryError(appliedQuery)) {
     updateQueryControls();
     $('summary').textContent = 'Enter a valid query to load pull requests.';
-    nextRefreshAt = Date.now() + refreshInterval;
+    polling.succeeded('list');
     updateRefreshButton();
     return;
   }
   clearTimeout(readinessTimer); readinessController?.abort();
+  statusController?.abort(); statusLoading = false;
   const request = loads.start();
-  if (!append && !refresh) { items = []; total = 0; cursor = null; more = false; limited = false; }
+  const pollRevision = polling.revision;
+  if (!append && !refresh) { loadedPages = 1; items = []; total = 0; cursor = null; more = false; limited = false; }
   loading = true; $('error').hidden = true;
   if (refresh) {
     // Keep the current rows mounted until fresh data is ready.
@@ -476,17 +565,32 @@ async function load({ append = false, refresh = false } = {}) {
   } else render();
   const query = new URLSearchParams({ q: appliedQuery });
   if (append && cursor) query.set('cursor', cursor);
-  if (refresh) query.set('refresh', '1');
+  if (refresh && !background) query.set('refresh', '1');
   try {
-    const response = await apiFetch(`/api/pulls?${query}`, { signal: request.signal });
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error || 'Could not load pull requests.');
+    let data, fetchedItems = [], pages = 0;
+    do {
+      const response = await apiFetch(`/api/pulls?${query}`, { signal: AbortSignal.any([request.signal, AbortSignal.timeout(35_000)]) });
+      data = await response.json();
+      if (!response.ok) throw responseError(response, data, 'Could not load pull requests.');
+      fetchedItems.push(...data.items); pages++;
+      if (!refresh || pages >= loadedPages || !data.pageInfo.hasNextPage) break;
+      query.set('cursor', data.pageInfo.endCursor);
+    } while (loads.isCurrent(request));
+    data.items = fetchedItems;
     if (!loads.isCurrent(request)) return;
     if (viewedStore.selectAccount(data.viewer)) {
       titleEdits.clear();
       draftChanges.clear();
       merges.clear();
     }
+    polling.succeeded('list', pollRevision);
+    // Preserve confirmed mutations if search indexing briefly returns an older version.
+    if (background) {
+      if (editingPull()) { polling.invalidate(); return; }
+      const previous = new Map(items.map(pr => [pr.id, pr]));
+      data.items = data.items.map(pr => Date.parse(previous.get(pr.id)?.updatedAt) > Date.parse(pr.updatedAt) ? previous.get(pr.id) : pr);
+    }
+    loadedPages = append ? loadedPages + 1 : pages;
     viewerLogin = data.viewer;
     items = mergePullPages(items, data.items, append);
     nameColors = assignNameColors(items.flatMap(pr => [pr.author, ...(pr.reviewers ?? []).map(reviewer => reviewer.name)]), nameColors);
@@ -497,6 +601,7 @@ async function load({ append = false, refresh = false } = {}) {
     $('updated').textContent = `Fetched ${new Date().toLocaleTimeString()}.`;
   } catch (error) {
     if (!loads.isCurrent(request) || error.name === 'AbortError') return;
+    polling.failed(error.retryAfter);
     $('error').replaceChildren(element('span', error.message + ' '));
     const retry = element('button', 'Retry'); retry.type = 'button';
     retry.addEventListener('click', () => load({ append, refresh: true }));
@@ -504,8 +609,8 @@ async function load({ append = false, refresh = false } = {}) {
   } finally {
     if (loads.isCurrent(request)) {
       loading = false;
-      nextRefreshAt = Date.now() + refreshInterval;
-      render();
+      if (!background || !editingPull()) render();
+      else updateRefreshButton();
       scheduleMergeReadiness();
     }
   }
@@ -556,11 +661,13 @@ for (const id of ['scope', 'state', 'sort']) $(id).addEventListener('change', ()
 $('group').addEventListener('change', () => { saveFilters(); render(); });
 $('refresh').addEventListener('click', () => load({ refresh: true }));
 $('more').addEventListener('click', () => load({ append: true }));
-setInterval(() => {
-  if (!authenticated) return;
-  if (!loading && Date.now() >= nextRefreshAt) load({ refresh: true });
-  else updateRefreshButton();
-}, 1000);
+setInterval(poll, 1000);
+document.addEventListener('visibilitychange', syncActivity);
+window.addEventListener('online', syncActivity);
+window.addEventListener('offline', syncActivity);
+window.addEventListener('focus', poll);
+window.addEventListener('pagehide', () => { events?.close(); events = null; });
+window.addEventListener('pageshow', syncActivity);
 
 async function initializeSession() {
   $('session-retry').hidden = true;
@@ -602,6 +709,7 @@ async function initializeSession() {
       await initializeQueryEditor();
       $('dashboard').hidden = false;
       await load();
+      syncActivity();
     }
   } catch {
     authenticated = false;

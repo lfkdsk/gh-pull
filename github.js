@@ -112,6 +112,15 @@ export function createGitHub(options = {}) {
     };
   }
 
+  // Fetch only active PRs between full searches, using their stable node IDs.
+  list.status = async ids => {
+    const data = await graphql(`query($ids: [ID!]!) {
+      viewer { login }
+      nodes(ids: $ids) { ... on PullRequest { ${fields} } }
+    }`, { ids });
+    return { items: await withMergeAccess(data.nodes.filter(pr => pr?.id).map(pr => normalizePullRequest(pr, data.viewer.login))) };
+  };
+
   list.mergeReadiness = async ids => {
     const data = await graphql(`query($ids: [ID!]!) {
       viewer { login }
