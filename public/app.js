@@ -525,7 +525,9 @@ function updateQueryControls() {
   const value = queryEditor.value;
   for (const [control, preset] of Object.entries(queryPresets(value))) $(control).value = preset;
   const error = queryError(value);
-  const feedback = error || (value !== appliedQuery ? 'Query changed — press Enter or Search to apply.' : '');
+  const hint = value !== appliedQuery ? 'Unapplied changes · Enter to search' : 'Enter to search';
+  if ($('query-hint').textContent !== hint) $('query-hint').textContent = hint;
+  const feedback = error || '';
   if ($('query-feedback').textContent !== feedback) $('query-feedback').textContent = feedback;
   $('query-feedback').hidden = !$('query-feedback').textContent;
   $('query-feedback').classList.toggle('query-error', Boolean(error));
