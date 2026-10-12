@@ -11,9 +11,9 @@ Choose how to run it:
 
 Both use your existing GitHub CLI login or a personal access token. No separate GitHub App installation is required. You can access the repositories your credentials allow, subject to your organization's token and SSO policies. A **GitHub.com** account is required; GitHub Enterprise hosts are not supported.
 
-[![Watch the gh-pull demo showing fictional pull requests](docs/demo.png)](docs/demo.mp4)
+[![Watch the gh-pull demo showing fictional pull requests](docs/demo.png)](https://www.youtube.com/watch?v=-Bynup-6nRs)
 
-[▶ Watch the demo](docs/demo.mp4) · 33 seconds · 4K
+[▶ Watch the demo](https://www.youtube.com/watch?v=-Bynup-6nRs) · 33 seconds · 4K
 
 ## GitHub CLI extension
 
