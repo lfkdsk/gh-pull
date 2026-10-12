@@ -1,8 +1,8 @@
 import { createPollingSchedule, pendingPulls } from './polling.js';
-import { createViewedStore, createLatestRequest, mergePullPages } from './state.js';
+import { createViewedStore, createLatestRequest, mergePullPages, createMergedStore } from './state.js';
 import { element, icon, clipboardFeedback } from './ui.js';
 import { assignNameColors, NAME_COLOR_COUNT, groupPulls, labels, relativeTime } from './model.js';
-import { queryFromParams, queryPresets, setQueryPreset, normalizeQuery, queryError } from './query.js';
+import { queryFromParams, queryPresets, setQueryPreset, normalizeQuery, queryError, matchesQueryState } from './query.js';
 
 const $ = id => document.getElementById(id);
 const params = new URLSearchParams(location.search);
@@ -11,6 +11,7 @@ let appliedQuery = queryFromParams(params);
 if (!queryError(appliedQuery)) appliedQuery = normalizeQuery(appliedQuery);
 let items = [], total = 0, cursor = null, more = false, limited = false, loading = false;
 const loads = createLatestRequest();
+const mergedStore = createMergedStore();
 const polling = createPollingSchedule();
 let statusLoading = false, statusController, statusOffset = 0, loadedPages = 1;
 let events;
@@ -104,7 +105,8 @@ async function refreshStatus() {
     // Edits may start while the request is in flight. Never replace those controls.
     if (editingPull()) return;
     let changed = false, reconcile = false;
-    for (const update of data.items) {
+    for (const incoming of data.items) {
+      const update = mergedStore.reconcile(incoming);
       const current = items.find(pr => pr.id === update.id);
       if (!current || Date.parse(update.updatedAt) < Date.parse(current.updatedAt)) continue;
       if (JSON.stringify(current) !== JSON.stringify(update)) {
@@ -113,7 +115,12 @@ async function refreshStatus() {
       }
     }
     if (reconcile) polling.invalidate();
-    if (changed) render();
+    if (changed) {
+      const count = items.length;
+      items = items.filter(pr => matchesQueryState(pr, appliedQuery));
+      total = Math.max(0, total - (count - items.length));
+      render();
+    }
     $('updated').textContent = `Checked ${new Date().toLocaleTimeString()}.`;
   } catch (error) {
     if (controller.signal.aborted || version !== loads.revision) return;
@@ -235,6 +242,7 @@ async function changePull(pr, changes, { action, input = {}, apply, message, onS
     });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || messages.failure);
+    mergedStore.reconcile({ ...pr, ...data });
     apply(items.find(item => item.id === pr.id), data);
     changes.delete(pr.id); render();
     markViewed({ id: pr.id, updatedAt: data.updatedAt });
@@ -256,7 +264,7 @@ async function mergePull(pr) {
     apply(current, data) {
       if (!current) return;
       Object.assign(current, data);
-      if (queryPresets(appliedQuery).state === 'open') {
+      if (!matchesQueryState(current, appliedQuery)) {
         items = items.filter(item => item.id !== pr.id);
         total = Math.max(0, total - 1);
       }
@@ -579,6 +587,7 @@ async function load({ append = false, refresh = false, background = false } = {}
     data.items = fetchedItems;
     if (!loads.isCurrent(request)) return;
     if (viewedStore.selectAccount(data.viewer)) {
+      mergedStore.clear();
       titleEdits.clear();
       draftChanges.clear();
       merges.clear();
@@ -590,6 +599,10 @@ async function load({ append = false, refresh = false, background = false } = {}
       const previous = new Map(items.map(pr => [pr.id, pr]));
       data.items = data.items.map(pr => Date.parse(previous.get(pr.id)?.updatedAt) > Date.parse(pr.updatedAt) ? previous.get(pr.id) : pr);
     }
+    data.items = data.items.map(pr => mergedStore.reconcile(pr));
+    const excluded = new Set(data.items.filter(pr => !matchesQueryState(pr, appliedQuery)).map(pr => pr.id));
+    data.items = data.items.filter(pr => !excluded.has(pr.id));
+    data.total = Math.max(0, data.total - excluded.size);
     loadedPages = append ? loadedPages + 1 : pages;
     viewerLogin = data.viewer;
     items = mergePullPages(items, data.items, append);

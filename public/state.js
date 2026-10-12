@@ -63,3 +63,22 @@ export function createLatestRequest() {
 export function mergePullPages(previous, incoming, append) {
   return [...new Map([...(append ? previous : []), ...incoming].map(pr => [pr.id, pr])).values()];
 }
+
+// Merging is irreversible. Remember confirmations even after a row is removed,
+// so a stale search result cannot resurrect it as open. Scoped to one account.
+export function createMergedStore() {
+  const merged = new Map();
+  return {
+    clear() { merged.clear(); },
+    reconcile(pr) {
+      const known = merged.get(pr.id);
+      if (pr.status === 'MERGED' && (!known || Date.parse(pr.updatedAt) >= Date.parse(known.updatedAt))) {
+        merged.set(pr.id, { status: 'MERGED', updatedAt: pr.updatedAt, canMerge: false, mergePending: false });
+      }
+      const confirmation = merged.get(pr.id);
+      if (!confirmation) return pr;
+      return { ...pr, ...confirmation,
+        updatedAt: Date.parse(pr.updatedAt) > Date.parse(confirmation.updatedAt) ? pr.updatedAt : confirmation.updatedAt };
+    },
+  };
+}
