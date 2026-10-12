@@ -4,15 +4,45 @@ much better github pr dashboard
 
 A fast GitHub pull request dashboard with two authentication modes: use your existing GitHub CLI login locally, or sign in through a GitHub App. Both modes share the same UI and PR actions.
 
-**[Open the hosted dashboard](https://gh-pull.up.railway.app/)** and sign in with GitHub—no local setup required.
+Run gh-pull locally using your existing GitHub CLI login, or **[open the hosted dashboard](https://gh-pull.up.railway.app/)** and sign in with GitHub.
 
-If you can't get your organization's approval for the hosted GitHub App, you can [host it yourself in local mode](#local-mode) using your existing GitHub CLI login or a personal access token with access to your repositories. Your organization's token and SSO policies still apply.
+Local mode is useful when you can't get your organization's approval for the hosted GitHub App. It uses the repository access already available through your GitHub CLI login or personal access token; organization token and SSO policies still apply.
 
-Plain JavaScript, a CodeMirror query editor, and a Node server. No server runtime dependencies or build step to run the app; the editor bundle is checked in. A **GitHub.com** account is required; running it yourself also requires **Node.js 22+**.
+A **GitHub.com** account is required. The packaged CLI extension includes its runtime; running from source requires **Node.js 22+**.
 
 ![gh-pull dashboard showing fictional demo pull requests](docs/demo.png)
 
-## Local mode
+## GitHub CLI extension
+
+Once the first binary release is published, install with [GitHub CLI](https://cli.github.com/):
+
+```sh
+gh auth login --hostname github.com  # Skip if already signed in
+gh extension install shiqicao/gh-pull
+gh pull
+```
+
+`gh pull` starts the dashboard in the background and opens your browser. Running it again reopens the same instance. No clone, Node installation, or GitHub App installation is needed. Closing the browser leaves the dashboard running until you stop it or shut down your computer; it does not register a system startup service.
+
+```sh
+gh pull --no-open          # Print the URL without opening a browser
+gh pull status            # Show the running instance
+gh pull stop              # Stop the dashboard
+gh pull --port 3456        # Use a specific port
+gh pull --foreground      # Keep it in the terminal; Ctrl+C stops it
+gh pull --version
+gh pull --licenses
+```
+
+The extension listens only on `127.0.0.1`. It prefers port 3000 and chooses a free port if needed. An explicit `--port` fails if occupied. The extension always uses local authentication, even if GitHub App environment variables are set. It inherits `GH_TOKEN` / `GITHUB_TOKEN` when supplied; otherwise it uses `gh auth token --hostname github.com`.
+
+Update with `gh pull stop`, `gh extension upgrade pull`, then `gh pull` to start the new version. Also restart after switching GitHub accounts or changing token environment variables. Stop before uninstalling with `gh extension remove pull`.
+
+Release builds target Linux and macOS (Intel/AMD and ARM64), and Windows x64. Private instance-control state is stored under the user's platform data directory (`~/.local/state/gh-pull` on Linux, `~/Library/Application Support/gh-pull` on macOS, or `%LOCALAPPDATA%\gh-pull` on Windows). It contains a local control token, not your GitHub token. `GH_PULL_STATE_DIR` can override this directory for testing or isolated instances.
+
+## Local mode from source
+
+Clone the repository, then run:
 
 ```sh
 gh auth login
@@ -154,3 +184,11 @@ After updating CodeMirror dependencies or the exported APIs in `scripts/vendor/c
 ## License
 
 [MIT](LICENSE) © 2026 shiqicao. Third-party attribution and license terms are listed in [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES).
+
+### Developing the CLI extension
+
+Run `npm ci` and `npm run cli -- --no-open` to try the launcher from source. Use `npm run cli -- stop` to stop it.
+
+`npm run build:extension` builds a native standalone executable into `dist/`, embedding the UI, backend, Node runtime, and license notices. It uses Node's single-executable application support, esbuild, and postject; use Node 24.18.0 to match CI. The build fetches the matching Node license and leaves generated intermediates in `.build/`. `npm run test:extension` checks the actual binary and local GitHub CLI installation with isolated state and fake credentials. `npm run test:extension:browser` checks its browser UI on Linux using Playwright and fixture responses.
+
+The extension workflow tests native builds on each supported platform. Version tags (`v*`) publish the tested binaries as GitHub release assets; pull requests only build and test artifacts. A stable binary release is required before remote `gh extension install shiqicao/gh-pull` works.
