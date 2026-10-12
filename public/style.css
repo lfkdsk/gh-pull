@@ -454,12 +454,13 @@ button, .pr-group > summary {
   margin: 8px 0 0;
 }
 
-.draft-action, .merge-action {
+.draft-action, .merge-action, .conflict-action {
   border: 0;
   line-height: inherit;
+  text-decoration: none;
 }
 
-.draft-action:hover:not(:disabled), .merge-action:hover:not(:disabled) {
+.draft-action:hover:not(:disabled), .merge-action:hover:not(:disabled), .conflict-action:hover {
   outline: 1px solid currentColor;
 }
 

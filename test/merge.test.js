@@ -12,6 +12,17 @@ const ready = {
   commits: { nodes: [{ commit: { statusCheckRollup: { state: 'SUCCESS' } } }] },
 };
 const input = { id: ready.id, headOid, mergeMethod: 'SQUASH' };
+test('conflict state distinguishes conflicts from other merge blockers', () => {
+  for (const fields of [{ mergeable: 'CONFLICTING' }, { mergeStateStatus: 'DIRTY' }]) {
+    assert.equal(mergeOptions({ ...ready, ...fields }, 'alice').hasConflicts, true);
+    assert.equal(mergeOptions({ ...ready, ...fields }, 'alice').canMerge, false);
+    assert.equal(mergeOptions({ ...ready, ...fields, state: 'MERGED' }, 'alice').hasConflicts, false);
+  }
+  for (const mergeStateStatus of ['CLEAN', 'BLOCKED', 'UNKNOWN', 'UNSTABLE', 'BEHIND']) {
+    assert.equal(mergeOptions({ ...ready, mergeStateStatus }, 'alice').hasConflicts, false);
+  }
+});
+
 function client(pr = ready, result = { id: ready.id, state: 'MERGED', updatedAt: '2026-10-08T00:00:00Z' }, getMergeAccess) {
   const calls = [];
   const github = createGitHub({ getMergeAccess, getToken: async () => 'mock', fetchImpl: async (url, options) => {

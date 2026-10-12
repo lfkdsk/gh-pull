@@ -55,11 +55,30 @@ async function fixture(t, overrides = {}) {
   return {
     page, open, unread, waitRead, refresh, errors,
     reject: value => { reject = value; },
-    laterUpdate: () => update({}),
+    laterUpdate: (fields = {}) => update(fields),
     holdRefresh: () => { hold = new Promise(resolve => { release = resolve; }); },
     releaseRefresh: () => { release(); hold = null; },
   };
 }
+
+test('conflicting PRs link to resolution in place of merge and update after refresh', async t => {
+  const f = await fixture(t, { hasConflicts: true, canMerge: false });
+  await f.open();
+  const resolve = f.page.locator('.conflict-action');
+  assert.equal(await resolve.textContent(), 'Resolve conflict');
+  assert.equal(await resolve.getAttribute('href'), 'https://github.com/example/dashboard/pull/1/conflicts');
+  assert.equal(await resolve.getAttribute('target'), '_blank');
+  assert.equal(await f.page.locator('.merge-action').count(), 0);
+  f.laterUpdate({ hasConflicts: false, canMerge: true });
+  await f.refresh();
+  assert.equal(await resolve.count(), 0);
+  assert.equal(await f.page.locator('.merge-action').count(), 1);
+  for (const changes of [{ status: 'MERGED' }, { status: 'DRAFT' }, { status: 'OPEN', author: 'bob' }]) {
+    f.laterUpdate({ ...changes, hasConflicts: true, canMerge: false });
+    await f.refresh();
+    assert.equal(await resolve.count(), 0);
+  }
+});
 
 test('review badges distinguish bypass permission from required reviews', async t => {
   for (const review of ['REVIEW_BYPASS_AVAILABLE', 'REVIEW_REQUIRED']) {

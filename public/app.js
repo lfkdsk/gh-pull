@@ -419,7 +419,17 @@ function render() {
         });
         line.append(edit);
       }
-      if (pr.status === 'OPEN' && pr.canMerge && pr.author.toLowerCase() === viewerLogin.toLowerCase()) {
+      if (pr.status === 'OPEN' && pr.hasConflicts && pr.author.toLowerCase() === viewerLogin.toLowerCase() && title.hasAttribute('href')) {
+        const resolve = element('a', 'Resolve conflict', 'badge review_required conflict-action');
+        const url = new URL(title.href);
+        url.pathname = `${url.pathname.replace(/\/$/, '')}/conflicts`;
+        url.search = ''; url.hash = '';
+        resolve.href = url.href;
+        resolve.target = '_blank'; resolve.rel = 'noopener noreferrer';
+        resolve.dataset.viewPr = '';
+        resolve.title = 'Resolve merge conflicts on GitHub (opens in a new tab)';
+        line.append(resolve);
+      } else if (pr.status === 'OPEN' && pr.canMerge && pr.author.toLowerCase() === viewerLogin.toLowerCase()) {
         const method = { MERGE: 'Merge', SQUASH: 'Squash and merge', REBASE: 'Rebase and merge' }[pr.mergeMethod];
         const merge = element('button', merges.get(pr.id)?.saving ? 'Merging…' : method, 'badge open merge-action');
         merge.type = 'button';

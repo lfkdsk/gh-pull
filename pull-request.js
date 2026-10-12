@@ -12,7 +12,8 @@ export function mergeOptions(pr, viewerLogin) {
   const mergePending = Boolean(viewerLogin && pr.author?.login?.toLowerCase() === viewerLogin.toLowerCase() && pr.state === 'OPEN' && !pr.isDraft &&
     !pr.mergeQueue && !pr.stackEntry && ['WRITE', 'MAINTAIN', 'ADMIN'].includes(repo.viewerPermission) && methods.length &&
     (pr.mergeable === 'UNKNOWN' || pr.mergeStateStatus === 'UNKNOWN'));
-  return { canMerge, mergePending, headOid: pr.headRefOid, mergeMethod: methods.includes(repo.viewerDefaultMergeMethod) ? repo.viewerDefaultMergeMethod : methods[0] };
+  const hasConflicts = pr.state === 'OPEN' && (pr.mergeable === 'CONFLICTING' || pr.mergeStateStatus === 'DIRTY');
+  return { canMerge, mergePending, hasConflicts, headOid: pr.headRefOid, mergeMethod: methods.includes(repo.viewerDefaultMergeMethod) ? repo.viewerDefaultMergeMethod : methods[0] };
 }
 
 function checkCountsFor(pr) {
