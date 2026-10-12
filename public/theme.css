@@ -1,5 +1,14 @@
 /* Shared theme values. Keep component-specific geometry in component styles. */
+@font-face {
+  font-family: 'Inter';
+  src: url('/fonts/InterVariable-4.1.woff2') format('woff2');
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+}
+
 :root {
+  --font-ui: 'Inter', system-ui, sans-serif;
   --color-text: light-dark(#1f2328, #e6edf3);
   --color-page: light-dark(#ffffff, #0d1117);
   --color-muted: light-dark(#59636e, #a7b1bd);

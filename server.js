@@ -21,6 +21,8 @@ const assets = new Map([
   ['/style.css', ['style.css', 'text/css']],
   ['/theme.css', ['theme.css', 'text/css']],
   ['/query-editor.css', ['query-editor.css', 'text/css']],
+  ['/fonts/InterVariable-4.1.woff2', ['fonts/InterVariable-4.1.woff2', 'font/woff2']],
+  ['/fonts/Inter-LICENSE.txt', ['fonts/Inter-LICENSE.txt', 'text/plain']],
   ['/favicon.svg', ['favicon.svg', 'image/svg+xml']],
 ]);
 
@@ -132,7 +134,8 @@ export function createApp({ list = createGitHub(), updateTitle = list.updateTitl
         res.setHeader('Content-Security-Policy', res.getHeader('Content-Security-Policy').replace("style-src 'self'", `style-src 'self' 'nonce-${nonce}'; style-src-attr 'unsafe-inline'`));
         body = body.toString('utf8').replace('STYLE_NONCE', nonce);
       }
-      res.writeHead(200, { 'Content-Type': `${asset[1]}; charset=utf-8` });
+      if (asset[1].startsWith('font/')) res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+      res.writeHead(200, { 'Content-Type': asset[1].startsWith('font/') ? asset[1] : `${asset[1]}; charset=utf-8` });
       res.end(body);
     } catch (error) {
       if (auth && error.status === 401) auth.invalidate(req, res);

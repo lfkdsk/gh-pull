@@ -1,6 +1,6 @@
 /* Base and page layout */
 :root {
-  font-family: system-ui, sans-serif;
+  font-family: var(--font-ui);
   font-size: 14px;
   line-height: 1.5;
   color-scheme: light dark;
