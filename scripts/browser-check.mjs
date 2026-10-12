@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { chromium } from 'playwright';
-import { createApp } from '../server.js';
+import { browserFixture } from './browser-fixture.mjs';
 import { ApiError } from '../github.js';
 
 async function fixture(t) {
@@ -15,9 +14,10 @@ async function fixture(t) {
     headOid: 'a'.repeat(40), mergeMethod: 'SQUASH',
   };
   let reject = false, hour = 1, hold, release;
-  const list = async () => {
+  const list = async ({ query = '' } = {}) => {
     if (hold) await hold;
-    return { viewer: 'alice', total: 1, items: [{ ...pr }], pageInfo: { hasNextPage: false } };
+    const items = query.includes('does-not-exist') ? [] : [{ ...pr }];
+    return { viewer: 'alice', total: items.length, items, pageInfo: { hasNextPage: false } };
   };
   list.mergeReadiness = async () => ({ items: [] });
   const update = fields => {
@@ -26,23 +26,14 @@ async function fixture(t) {
     return { ...pr };
   };
   // Every action is implemented by this fixture. Nothing calls GitHub or gh CLI.
-  const server = createApp({
+  const { page, origin, errors } = await browserFixture(t, {
     list,
     updateTitle: async ({ title }) => update({ title }),
     convertToDraft: async () => update({ status: 'DRAFT', canMerge: false }),
     markReadyForReview: async () => update({ status: 'OPEN', canMerge: true }),
     merge: async () => update({ status: 'MERGED', canMerge: false }),
   });
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-  t.after(() => new Promise(resolve => { release?.(); server.close(resolve); server.closeAllConnections(); }));
-  const browser = await chromium.launch({ executablePath: process.env.CHROME_BIN || undefined });
-  t.after(() => browser.close());
-  const page = await browser.newPage();
-  page.setDefaultTimeout(5000);
-  const origin = `http://127.0.0.1:${server.address().port}`;
-  const errors = [];
-  page.on('pageerror', error => errors.push(error.message));
-  await page.route('**/*', route => new URL(route.request().url()).origin === origin ? route.continue() : route.abort());
+  t.after(() => release?.());
   await page.addInitScript(() => {
     window.copiedText = null;
     Object.defineProperty(navigator, 'clipboard', { value: { writeText: async text => {
@@ -126,9 +117,10 @@ test('clipboard, filters, background refresh, icons and responsive metadata styl
     await page.selectOption('#scope', scope);
     assert.equal(await page.locator('#scope').inputValue(), scope);
   }
-  await page.fill('#search', 'does-not-exist');
+  await page.locator('.cm-content').fill('does-not-exist');
+  await page.click('#query-submit');
   await page.waitForFunction(() => !document.querySelector('.pr-row'));
-  await page.fill('#search', ''); await page.locator('.pr-row').waitFor();
+  await page.locator('.cm-content').fill(''); await page.click('#query-submit'); await page.locator('.pr-row').waitFor();
   f.holdRefresh(); await page.click('#refresh');
   assert.equal(await page.locator('#refresh').isDisabled(), true);
   assert.equal(await page.locator('.pr-row').count(), 1);

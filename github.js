@@ -80,11 +80,11 @@ export function createGitHub(options = {}) {
     const access = await getMergeAccess(repos);
     return items.map(pr => access.has(pr.repo) ? { ...pr, mergeAccess: access.get(pr.repo) } : pr);
   }
-  async function list({ scope = 'authored', state = 'open', cursor = null } = {}) {
+  async function list({ scope = 'authored', state = 'open', cursor = null, query: customQuery } = {}) {
     const states = { open: ['OPEN'], closed: ['CLOSED'], merged: ['MERGED'], all: ['OPEN', 'CLOSED', 'MERGED'] }[state];
     if (!states || !['authored', 'involved', 'review'].includes(scope)) throw new ApiError('Invalid filter.', 400);
     let data, connection;
-    if (scope === 'authored') {
+    if (customQuery === undefined && scope === 'authored') {
       data = await graphql(`query($cursor: String, $states: [PullRequestState!]) {
         viewer { login pullRequests(first: 50, after: $cursor, states: $states,
           orderBy: {field: UPDATED_AT, direction: DESC}) {
@@ -94,7 +94,7 @@ export function createGitHub(options = {}) {
       connection = data.viewer.pullRequests;
     } else {
       const qualifier = scope === 'involved' ? 'involves:@me' : 'review-requested:@me';
-      const query = `is:pr ${qualifier} ${state === 'all' ? '' : `is:${state}`} sort:updated-desc`;
+      const query = customQuery ?? `is:pr ${qualifier} ${state === 'all' ? '' : `is:${state}`} sort:updated-desc`;
       data = await graphql(`query($cursor: String, $query: String!) {
         viewer { login }
         search(type: ISSUE, query: $query, first: 50, after: $cursor) {
@@ -106,7 +106,7 @@ export function createGitHub(options = {}) {
     return {
       viewer: data.viewer.login,
       total: connection.totalCount ?? connection.issueCount,
-      limited: scope !== 'authored' && connection.issueCount > 1000,
+      limited: connection.issueCount > 1000,
       pageInfo: connection.pageInfo,
       items: await withMergeAccess(connection.nodes.filter(pr => pr?.id).map(pr => normalizePullRequest(pr, data.viewer.login))),
     };

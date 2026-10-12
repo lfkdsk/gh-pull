@@ -3,6 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="style-nonce" content="STYLE_NONCE">
   <meta name="description" content="Your GitHub pull requests, in one fast dashboard.">
   <title>gh-pull · Pull requests</title>
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
@@ -24,11 +25,15 @@
   <button id="session-retry" type="button" hidden>Retry connection</button>
   <main id="dashboard" hidden>
     <form id="filters" aria-label="Pull request filters">
-      <label>Show<select id="scope"><option value="authored">Created by me</option><option value="involved" selected>Involving me</option><option value="review">Review requested</option></select></label>
-      <label>State<select id="state"><option value="open">Open (including drafts)</option><option value="all">All states</option><option value="merged">Merged</option><option value="closed">Closed</option></select></label>
-      <label class="search">Search loaded PRs<input id="search" type="search" placeholder="Title, repository, author, #number, label…" autocomplete="off"></label>
+      <div class="query-search">
+        <div class="query-caption"><span id="query-label">Search pull requests</span><span id="query-help">Enter to search · Ctrl+Space for suggestions · <a href="https://docs.github.com/en/search-github/searching-on-github/searching-issues-and-pull-requests" target="_blank" rel="noopener noreferrer">Search syntax</a></span></div>
+        <div class="query-row"><div id="query-editor"></div><button id="query-submit" type="submit">Search</button></div>
+        <p id="query-feedback" role="status" aria-live="polite" hidden></p>
+      </div>
+      <label>Show<select id="scope"><option value="authored">Created by me</option><option value="involved" selected>Involving me</option><option value="review">Review requested</option><option value="all">Anyone</option><option value="custom" disabled>Custom</option></select></label>
+      <label>State<select id="state"><option value="open">Open (including drafts)</option><option value="all">All states</option><option value="merged">Merged</option><option value="closed">Closed (unmerged)</option><option value="custom" disabled>Custom</option></select></label>
       <label>Group by<select id="group"><option value="repo">Repository</option><option value="author">Author</option><option value="status">Status</option><option value="checks">Checks</option><option value="none">No grouping</option></select></label>
-      <label>Sort<select id="sort"><option value="updated">Recently updated</option><option value="created">Newest created</option><option value="oldest">Oldest created</option></select></label>
+      <label>Sort<select id="sort"><option value="updated">Recently updated</option><option value="created">Newest created</option><option value="oldest">Oldest created</option><option value="relevance">Best match</option><option value="custom" disabled>Custom</option></select></label>
     </form>
     <p id="summary" role="status" aria-live="polite">Loading pull requests…</p>
     <div id="error" role="alert" hidden></div>

@@ -2,6 +2,8 @@ import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
+import { randomBytes } from 'node:crypto';
+import { toGitHubQuery } from './public/query.js';
 import { createGitHub, ApiError, validateTitleUpdate, validateDraftUpdate, validateMerge } from './github.js';
 import { authConfig, createAuth } from './auth.js';
 import { createMarketplaceWebhook } from './marketplace.js';
@@ -12,6 +14,10 @@ const assets = new Map([
   ['/model.js', ['model.js', 'text/javascript']],
   ['/ui.js', ['ui.js', 'text/javascript']],
   ['/state.js', ['state.js', 'text/javascript']],
+  ['/query.js', ['query.js', 'text/javascript']],
+  ['/query-editor.js', ['query-editor.js', 'text/javascript']],
+  ['/vendor/codemirror.js', ['vendor/codemirror.js', 'text/javascript']],
+  ['/vendor/codemirror.LICENSE.txt', ['vendor/codemirror.LICENSE.txt', 'text/plain']],
   ['/style.css', ['style.css', 'text/css']],
   ['/favicon.svg', ['favicon.svg', 'image/svg+xml']],
 ]);
@@ -98,10 +104,15 @@ export function createApp({ list = createGitHub(), updateTitle = list.updateTitl
         if (!['authored', 'involved', 'review'].includes(scope) || !['open', 'all', 'merged', 'closed'].includes(state) || (cursor?.length ?? 0) > 1000) {
           return send(400, { error: 'Invalid filter or cursor.' });
         }
-        const key = JSON.stringify([scope, state, cursor]);
+        let query;
+        if (url.searchParams.has('q')) {
+          try { query = toGitHubQuery(url.searchParams.get('q')); }
+          catch (error) { return send(400, { error: error.message }); }
+        }
+        const key = JSON.stringify(query === undefined ? [scope, state, cursor] : ['query', query, cursor]);
         let entry = cache.get(key);
         if (!entry || entry.expires < Date.now() || url.searchParams.get('refresh') === '1') {
-          entry = { result: activeList({ scope, state, cursor }), expires: Date.now() + 30_000 };
+          entry = { result: activeList(query === undefined ? { scope, state, cursor } : { query, cursor }), expires: Date.now() + 30_000 };
           cache.set(key, entry);
           if (cache.size > 100) cache.delete(cache.keys().next().value);
         }
@@ -110,7 +121,15 @@ export function createApp({ list = createGitHub(), updateTitle = list.updateTitl
       }
       const asset = assets.get(url.pathname);
       if (!asset) return send(404, { error: 'Not found.' });
-      const body = await readFile(new URL(`./public/${asset[0]}`, import.meta.url));
+      let body = await readFile(new URL(`./public/${asset[0]}`, import.meta.url));
+      if (url.pathname === '/') {
+        // CodeMirror mounts nonce-authorized style sheets. Browsers also copy
+        // token colors into style attributes while editing contenteditable text.
+        // Allow those attributes only; scripts and style sheets stay restricted.
+        const nonce = randomBytes(18).toString('base64');
+        res.setHeader('Content-Security-Policy', res.getHeader('Content-Security-Policy').replace("style-src 'self'", `style-src 'self' 'nonce-${nonce}'; style-src-attr 'unsafe-inline'`));
+        body = body.toString('utf8').replace('STYLE_NONCE', nonce);
+      }
       res.writeHead(200, { 'Content-Type': `${asset[1]}; charset=utf-8` });
       res.end(body);
     } catch (error) {

@@ -1,14 +1,13 @@
 import { createViewedStore, createLatestRequest, mergePullPages } from './state.js';
 import { element, icon, clipboardFeedback } from './ui.js';
 import { assignNameColors, NAME_COLOR_COUNT, groupPulls, labels, relativeTime } from './model.js';
+import { queryFromParams, queryPresets, setQueryPreset, normalizeQuery, queryError } from './query.js';
 
 const $ = id => document.getElementById(id);
-const controls = ['scope', 'state', 'search', 'group', 'sort'];
 const params = new URLSearchParams(location.search);
-for (const id of controls) {
-  const input = $(id), value = params.get(id);
-  if (value !== null && (id === 'search' || [...input.options].some(option => option.value === value))) input.value = value;
-}
+if ([...$('group').options].some(option => option.value === params.get('group'))) $('group').value = params.get('group');
+let appliedQuery = queryFromParams(params);
+if (!queryError(appliedQuery)) appliedQuery = normalizeQuery(appliedQuery);
 let items = [], total = 0, cursor = null, more = false, limited = false, loading = false;
 const loads = createLatestRequest();
 const refreshInterval = 60_000;
@@ -81,8 +80,7 @@ const viewedStore = createViewedStore({
 });
 
 function updateSummary() {
-  const { count } = groupPulls(items, { search: $('search').value, group: $('group').value, sort: $('sort').value });
-  $('summary').textContent = `${count} shown · ${items.length} loaded · ${total} total${loading ? ' · Loading…' : ''}${limited ? ' · GitHub search returns at most 1,000 results; use Created by me for your full history.' : ''}`;
+  $('summary').textContent = `${items.length} loaded · ${total} total${loading ? ' · Loading…' : ''}${limited ? ' · GitHub search returns at most 1,000 results. Narrow your query to see more specific results.' : ''}`;
 }
 
 function updateTitleBrightness() {
@@ -171,7 +169,7 @@ async function mergePull(pr) {
     apply(current, data) {
       if (!current) return;
       Object.assign(current, data);
-      if ($('state').value === 'open') {
+      if (queryPresets(appliedQuery).state === 'open') {
         items = items.filter(item => item.id !== pr.id);
         total = Math.max(0, total - 1);
       }
@@ -240,7 +238,7 @@ function titleEditor(pr) {
 }
 
 function render() {
-  const { count, groups } = groupPulls(items, { search: $('search').value, group: $('group').value, sort: $('sort').value });
+  const { count, groups } = groupPulls(items, { group: $('group').value, sort: 'query' });
   updateSummary();
   const fragment = document.createDocumentFragment();
   for (const [name, prs] of groups) {
@@ -445,7 +443,7 @@ function render() {
     }
     section.append(list); fragment.append(section);
   }
-  if (!count && !loading) fragment.append(element('p', items.length ? 'No loaded pull requests match your search.' : 'No pull requests found for these filters.', 'empty'));
+  if (!count && !loading) fragment.append(element('p', 'No pull requests found for this query.', 'empty'));
   $('results').replaceChildren(fragment);
   $('results').setAttribute('aria-busy', String(loading));
   $('more').hidden = !more; $('more').disabled = loading;
@@ -453,7 +451,14 @@ function render() {
 }
 
 async function load({ append = false, refresh = false } = {}) {
-  if (!authenticated) return;
+  if (!authenticated || !queryEditor) return;
+  if (queryError(appliedQuery)) {
+    updateQueryControls();
+    $('summary').textContent = 'Enter a valid query to load pull requests.';
+    nextRefreshAt = Date.now() + refreshInterval;
+    updateRefreshButton();
+    return;
+  }
   clearTimeout(readinessTimer); readinessController?.abort();
   const request = loads.start();
   if (!append && !refresh) { items = []; total = 0; cursor = null; more = false; limited = false; }
@@ -465,7 +470,7 @@ async function load({ append = false, refresh = false } = {}) {
     $('results').setAttribute('aria-busy', 'true');
     $('more').disabled = true;
   } else render();
-  const query = new URLSearchParams({ scope: $('scope').value, state: $('state').value });
+  const query = new URLSearchParams({ q: appliedQuery });
   if (append && cursor) query.set('cursor', cursor);
   if (refresh) query.set('refresh', '1');
   try {
@@ -503,14 +508,45 @@ async function load({ append = false, refresh = false } = {}) {
 }
 
 function saveFilters() {
-  const query = new URLSearchParams(controls.map(id => [id, $(id).value]).filter(([, value]) => value));
+  const query = new URLSearchParams({ q: appliedQuery, group: $('group').value });
   history.replaceState(null, '', `?${query}`);
 }
-$('filters').addEventListener('submit', event => event.preventDefault());
-for (const id of controls) $(id).addEventListener(id === 'search' ? 'input' : 'change', () => {
-  saveFilters();
-  if (id === 'scope' || id === 'state') load(); else render();
+let queryEditor;
+async function initializeQueryEditor() {
+  if (queryEditor) return;
+  const { createQueryEditor } = await import('./query-editor.js');
+  queryEditor = createQueryEditor({
+    parent: $('query-editor'), value: appliedQuery, getItems: () => items,
+    onChange: updateQueryControls, onSubmit: applyQuery,
+  });
+  updateQueryControls();
+}
+function updateQueryControls() {
+  const value = queryEditor.value;
+  for (const [control, preset] of Object.entries(queryPresets(value))) $(control).value = preset;
+  const error = queryError(value);
+  const feedback = error || (value !== appliedQuery ? 'Query changed — press Enter or Search to apply.' : '');
+  if ($('query-feedback').textContent !== feedback) $('query-feedback').textContent = feedback;
+  $('query-feedback').hidden = !$('query-feedback').textContent;
+  $('query-feedback').classList.toggle('query-error', Boolean(error));
+  $('query-editor').classList.toggle('invalid', Boolean(error));
+  $('query-submit').disabled = Boolean(error);
+}
+function applyQuery() {
+  if (queryError(queryEditor.value)) { updateQueryControls(); return; }
+  const next = normalizeQuery(queryEditor.value);
+  const changed = next !== appliedQuery;
+  appliedQuery = next;
+  queryEditor.setValue(next);
+  updateQueryControls(); saveFilters();
+  load({ refresh: !changed });
+}
+$('filters').addEventListener('submit', event => { event.preventDefault(); applyQuery(); });
+for (const id of ['scope', 'state', 'sort']) $(id).addEventListener('change', () => {
+  queryEditor.setValue(setQueryPreset(queryEditor.value, id, $(id).value));
+  applyQuery();
 });
+$('group').addEventListener('change', () => { saveFilters(); render(); });
 $('refresh').addEventListener('click', () => load({ refresh: true }));
 $('more').addEventListener('click', () => load({ append: true }));
 setInterval(() => {
@@ -544,7 +580,7 @@ async function initializeSession() {
     authMode = session.mode;
     authenticated = session.authenticated;
     $('signin').hidden = authenticated;
-    $('dashboard').hidden = !authenticated;
+    $('dashboard').hidden = true;
     $('links-hint').hidden = !authenticated;
     $('refresh').hidden = !authenticated;
     $('logout').hidden = authMode !== 'github-app' || !authenticated;
@@ -555,8 +591,16 @@ async function initializeSession() {
     $('auth-notice').hidden = !notice;
     if (notice) $('auth-notice').textContent = notice;
     $('session-status').hidden = true;
-    if (authenticated) await load();
+    if (authenticated) {
+      await initializeQueryEditor();
+      $('dashboard').hidden = false;
+      await load();
+    }
   } catch {
+    authenticated = false;
+    $('dashboard').hidden = true;
+    $('refresh').hidden = true;
+    $('session-status').hidden = false;
     $('session-status').textContent = 'Could not connect. Please retry.';
     $('session-retry').hidden = false;
   }
