@@ -2,19 +2,20 @@
 
 much better github pr dashboard
 
-A fast GitHub pull request dashboard with two authentication modes: use your existing GitHub CLI login locally, or sign in through a GitHub App. Both modes share the same UI and PR actions.
+A fast, local GitHub pull request dashboard. Group PRs by repository, search with GitHub qualifiers, track reviews and checks, and manage your own PRs from one view.
 
-Run gh-pull locally using your existing GitHub CLI login, or **[open the hosted dashboard](https://gh-pull.up.railway.app/)** and sign in with GitHub.
+Choose how to run it:
 
-Local mode is useful when you can't get your organization's approval for the hosted GitHub App. It uses the repository access already available through your GitHub CLI login or personal access token; organization token and SSO policies still apply.
+- **[GitHub CLI extension](#github-cli-extension) — recommended:** Install once, then run `gh pull`. No Node installation or source checkout needed.
+- **[Local app from source](#local-app-from-source):** Clone the repository and run it with Node.js. Useful for development and customization.
 
-A **GitHub.com** account is required. The packaged CLI extension includes its runtime; running from source requires **Node.js 22+**.
+Both use your existing GitHub CLI login or a personal access token. No separate GitHub App installation is required. You can access the repositories your credentials allow, subject to your organization's token and SSO policies. A **GitHub.com** account is required; GitHub Enterprise hosts are not supported.
 
 ![gh-pull dashboard showing fictional demo pull requests](docs/demo.png)
 
 ## GitHub CLI extension
 
-Once the first binary release is published, install with [GitHub CLI](https://cli.github.com/):
+Install [GitHub CLI](https://cli.github.com/) if needed, then run:
 
 ```sh
 gh auth login --hostname github.com  # Skip if already signed in
@@ -34,18 +35,20 @@ gh pull --version
 gh pull --licenses
 ```
 
-The extension listens only on `127.0.0.1`. It prefers port 3000 and chooses a free port if needed. An explicit `--port` fails if occupied. The extension always uses local authentication, even if GitHub App environment variables are set. It inherits `GH_TOKEN` / `GITHUB_TOKEN` when supplied; otherwise it uses `gh auth token --hostname github.com`.
+The extension listens only on `127.0.0.1`. It prefers port 3000 and chooses a free port if needed. An explicit `--port` fails if occupied. It inherits `GH_TOKEN` / `GITHUB_TOKEN` when supplied; otherwise it uses `gh auth token --hostname github.com`.
 
 Update with `gh pull stop`, `gh extension upgrade pull`, then `gh pull` to start the new version. Also restart after switching GitHub accounts or changing token environment variables. Stop before uninstalling with `gh extension remove pull`.
 
 Release builds target Linux and macOS (Intel/AMD and ARM64), and Windows x64. Private instance-control state is stored under the user's platform data directory (`~/.local/state/gh-pull` on Linux, `~/Library/Application Support/gh-pull` on macOS, or `%LOCALAPPDATA%\gh-pull` on Windows). It contains a local control token, not your GitHub token. `GH_PULL_STATE_DIR` can override this directory for testing or isolated instances.
 
-## Local mode from source
+## Local app from source
 
-Clone the repository, then run:
+Requires **Node.js 22+**, plus either GitHub CLI authentication or a personal access token. No npm dependencies or build step are needed to run the app.
 
 ```sh
-gh auth login
+git clone https://github.com/shiqicao/gh-pull.git
+cd gh-pull
+gh auth login --hostname github.com  # Skip if already signed in
 npm start
 ```
 
@@ -53,72 +56,31 @@ Open <http://localhost:3000>. Local mode is the default (`AUTH_MODE=local`). The
 
 `npm start` and `npm run dev` restart the server when backend files change. Reload the browser after frontend edits. Use `node server.js` to run without automatic restarts.
 
-## GitHub App mode
+## Local configuration
 
-Users select **Sign in with GitHub** and authorize the app. Each session has its own GitHub client and PR cache. This mode never uses the server owner's GitHub CLI credentials or personal token.
-
-Register a [GitHub App](https://github.com/settings/apps/new) with its user authorization callback set to `PUBLIC_URL/auth/callback`. For local development, use `http://localhost:3000/auth/callback`. Create a client secret and configure the app:
-
-```sh
-cp .env.example .env
-# Set AUTH_MODE=github-app and fill in the GitHub App settings in .env.
-node --env-file=.env server.js
-```
-
-`.env` is ignored by Git. `npm start` reads environment variables already set in your shell; it does not load `.env` automatically.
-
-Repository permissions for the full feature set:
-
-| Permission | Access | Purpose |
+| Setting | Applies to | Description |
 | --- | --- | --- |
-| Pull requests | Read and write | View PRs, edit titles, change draft status |
-| Contents | Read and write | Merge PRs |
-| Checks | Read-only | Check results and progress |
-| Commit statuses | Read-only | Commit status results |
+| `GH_TOKEN` / `GITHUB_TOKEN` | Both | Optional token; takes precedence over your GitHub CLI login |
+| `--port PORT` | Extension | Select a port explicitly; otherwise tries 3000, then an available port |
+| `GH_PULL_STATE_DIR` | Extension | Override the directory containing instance-control state |
+| `PORT` | Source | Server port; defaults to 3000 |
+| `AUTH_MODE=local` | Source | Local authentication; this is the default |
 
-Metadata read access is included by GitHub. Read-only Pull requests and Contents permissions can be used if write actions are not needed; GitHub rejects writes without the corresponding permission.
+Credentials stay in the local backend and are never sent to the browser. Both options bind only to `127.0.0.1`. The extension uses `--port`, not the source server's `PORT` environment variable.
 
-Keep user access token expiration enabled. An app private key and repository webhooks are not needed. The optional Marketplace webhook is described below. Leave “Request user authorization (OAuth) during installation” disabled: sign-in starts from the dashboard with browser-bound state and PKCE.
-
-Install the app on the repositories it should access. Private repositories must be accessible to both the app and the signed-in user; organization access may require administrator approval or an active SSO session. Set the optional app slug to enable **Install GitHub App** and **Manage repository access** links. Installation and repository approval take place on GitHub; return here and refresh afterward. See [GitHub's authorization documentation](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-a-user-access-token-for-a-github-app).
-
-## Configuration
-
-| Variable | Default | Description |
-| --- | --- | --- |
-| `AUTH_MODE` | `local` | `local` or `github-app` |
-| `PORT` | `3000` | Server port |
-| `HOST` | `127.0.0.1` | Bind address in GitHub App mode; local mode always uses loopback |
-| `GH_TOKEN` / `GITHUB_TOKEN` | GitHub CLI login | Local-mode authentication |
-| `PUBLIC_URL` | — | Required in GitHub App mode; public origin without a path |
-| `GITHUB_APP_CLIENT_ID` | — | Required in GitHub App mode; client ID, not app ID |
-| `GITHUB_APP_CLIENT_SECRET` | — | Required in GitHub App mode; kept on the server |
-| `GITHUB_APP_SLUG` | — | Optional app slug for the repository access link |
-| `GITHUB_MARKETPLACE_WEBHOOK_SECRET` | — | Optional shared secret for signed Marketplace deliveries in GitHub App mode |
-
-`PUBLIC_URL` requires HTTPS, except for HTTP localhost development. Its host must match incoming requests, and its `/auth/callback` URL must match the GitHub App registration. Use the same hostname throughout login; `localhost` and `127.0.0.1` are distinct.
-
-## Marketplace webhook
-
-GitHub App mode provides `POST /webhooks/marketplace`. It requires `application/json` and a valid `X-Hub-Signature-256` computed with `GITHUB_MARKETPLACE_WEBHOOK_SECRET`. Configure the same secret in the Marketplace listing's webhook settings. Without the secret, the endpoint returns 503; local mode returns 404. This endpoint uses signature authentication rather than browser cookies; browser API origin checks remain in place.
-
-The handler accepts signed `ping` events and effective purchases/cancellations for **free plans**. Purchases need no additional entitlement: users install the app and sign in through the existing OAuth flow. Use `PUBLIC_URL/auth/login` as the Marketplace setup URL. Paid plans, trials, and plan changes are not implemented and unsupported purchase actions return 422.
-
-Cancellations immediately disable matching in-memory sessions and clear their PR caches, then revoke their GitHub user tokens. Matching includes the purchasing user's numeric GitHub ID and sessions known to have accessed the account's repositories. Organization matching uses repository owners observed by this process, not an organization membership directory. This ends existing sessions; it does not prevent a later sign-in to the free dashboard or uninstall the GitHub App.
-
-Delivery IDs and payload hashes are kept in memory for 24 hours (up to 1,000 entries), with expired entries removed on subsequent deliveries. Duplicate deliveries share processing. Failed revocations return an error and retain inaccessible credentials until retry or session expiry. Monitor failed deliveries and [redeliver them from GitHub](https://docs.github.com/en/webhooks/testing-and-troubleshooting-webhooks/redelivering-webhooks); GitHub does not automatically retry. State is process-local and lost on restart: this is not a durable billing system or a shared queue for multiple instances.
+`npm start` reads environment variables from your shell. If you prefer a `.env` file, use `node --env-file=.env server.js`; `.env` files are ignored by Git.
 
 ## Features
 
 - **Query search:** Search GitHub with highlighted qualifiers and autocomplete. Show, State, and Sort are synchronized shortcuts for the query; queries and grouping are shareable through the URL.
 - **Grouping:** Group results by repository, author, status, or checks; collapse groups while preserving GitHub's query order within each group.
-- **PR details:** Authors, reviewers, review decisions, labels, changed-line counts, source branches, and update times. Authors and reviewers have consistent colors saved in this browser.
+- **PR details:** Authors, reviewers, review decisions, labels, changed-line and file counts, comment counts, source branches, and update times. Authors and reviewers have consistent colors saved in this browser.
 - **Check progress:** Pending badges show passed/total counts, such as **Checks pending · 1/8**. Only successful checks count as passed; skipped and neutral checks do not. Failed-check badges link to GitHub's checks page.
 - **Background refresh:** Refreshes 60 seconds after each load finishes. The circular refresh icon shows the countdown in its center and tooltip, and spins while fetching, with the button disabled until the request finishes. Existing PRs stay visible until fresh data arrives, including when a refresh fails.
 - **Viewed tracking:** New updates have brighter, bolder titles. Opening a PR, diff, or checks link marks the displayed update as viewed. Newer updates highlight it again; tracking is per GitHub account and synchronized across dashboard tabs.
 - **Quick links and copying:** Open PRs, repositories, diffs, and user profiles in new tabs. Usernames keep their existing appearance and show a pointer cursor. Copy PR URLs or branch names with confirmation feedback.
 - **Feedback:** Use **report an issue** in the footer to open this repository's GitHub issue form.
-- **Appearance:** Responsive layout, keyboard-accessible controls, and system light/dark colors.
+- **Appearance:** Inter typography, responsive layout, keyboard-accessible controls, and system light/dark colors.
 
 ### Query search
 
@@ -136,11 +98,11 @@ Actions apply to your own PRs and require GitHub write permissions:
 
 - **Edit a title:** Select the pencil icon. Save or Enter submits; Cancel or Escape discards. Titles must be 1–256 characters on one line. Failed saves retain the draft, and the server checks whether the title changed on GitHub before updating it.
 - **Change draft status:** Select **Open** to convert a PR to draft, or **Draft** to mark it ready for review. A tooltip explains the action on hover. The badge changes after GitHub confirms, and merge readiness is rechecked automatically.
-- **Merge:** Eligible PRs show a button with the repository's preferred merge method. The server rechecks permissions and readiness and pins the merge to the displayed commit. Drafts, blocked PRs, merge queues, and stacked PRs do not show this action. In GitHub App mode, a mergeable PR keeps a disabled merge button when installation access or Contents write permission is missing, with a tooltip and an installation/access link when available. Access is checked again before merging. Local mode skips installation checks.
+- **Merge:** Eligible PRs show a button with the repository's preferred merge method. The server rechecks permissions and readiness and pins the merge to the displayed commit. Drafts, blocked PRs, merge queues, and stacked PRs do not show this action.
 
 If GitHub is still calculating mergeability, the dashboard rechecks in the background every two seconds, up to five times, without resetting loaded pages. The regular one-minute refresh continues afterward.
 
-## Data and sessions
+## Local data and privacy
 
 PRs load in pages of 50, with a 30-second server cache keyed by query and cursor. Manual and automatic refresh bypass the cache and reset pagination on success. Searches run against GitHub; grouping applies to loaded pages. All dashboard searches, including Created by me, expose at most 1,000 matches, with a notice when that limit applies. Narrow the query by repository or date to find more specific results.
 
@@ -148,22 +110,21 @@ Labels include the first ten per PR. Reviewers include up to 100 review requests
 
 Browser storage holds name colors and account-specific viewed PR IDs/timestamps, not PR contents or credentials. Without browser storage, tracking lasts only for the current page. Reading PRs directly on GitHub does not mark them as viewed here.
 
-GitHub App tokens remain on the server; the browser receives an opaque HttpOnly session cookie, marked Secure for HTTPS. Sessions last up to seven days, and expiring GitHub tokens refresh automatically. Sign out ends the dashboard session; app authorization can be revoked separately in GitHub settings.
+PR results are cached in memory by the local process and cleared when it stops. With the extension, closing the browser leaves the process running; use `gh pull stop` to end it. Automatic refresh runs in the browser, so closing the dashboard stops its polling.
 
-Sessions, login attempts, and caches are held in memory in a single server process. Restarting ends sessions. A shared session store would be needed for multiple server instances. GitHub Enterprise hosts are not supported.
+See the [Privacy Policy](PRIVACY.md), [Third-party services](THIRD_PARTY_SERVICES.md), and [Transparency disclosures](TRANSPARENCY.md) for further details on data handling and security.
 
-## Privacy and third-party services
+## Development
 
-See the [Privacy Policy](PRIVACY.md) for data handling, retention, and user controls, [Third-party services](THIRD_PARTY_SERVICES.md) for GitHub and Railway dependencies, and [Transparency disclosures](TRANSPARENCY.md) for security mechanisms and the scope of compliance claims.
-
-## Verify
+### Verify
 
 ```sh
+npm ci
 npm run check
 npm test
 ```
 
-Tests use Node's built-in test runner and mocked GitHub responses. They cover PR behavior, authentication, token refresh, session isolation, and request validation without credentials or network access.
+Tests use Node's built-in test runner and mocked GitHub responses. They cover PR behavior, CLI lifecycle and control access, authentication, and request validation using local fixture servers and mocked responses, without real GitHub credentials.
 
 Browser interaction tests use Playwright with isolated fixture PRs. They cover editing, draft/ready changes, merges, read tracking, clipboard feedback, query autocomplete and keyboard editing, synchronized presets, pagination, stale responses, background refresh, and light/dark mobile layouts. All mutations stay in the fixture server; external browser requests are blocked.
 
@@ -175,15 +136,13 @@ npm run test:browser
 
 To use an existing Chrome installation instead, set `CHROME_BIN` to its executable path when running `npm run test:browser`. Browser screenshots are written to `/tmp/gh-pull-query-browser` (override with `BROWSER_ARTIFACT_DIR`).
 
+### Frontend organization
+
 Our editor integration lives in `public/query-editor.js`; the shared query model lives in `public/query.js`. Both are ordinary source files and can be edited without rebuilding. Generated third-party code and its license notices live separately in `public/vendor/`.
 
 Shared colors and sizing live in `public/theme.css`, dashboard and reusable component styles in `public/style.css`, and query editor styles in `public/query-editor.css`. Use the shared theme variables when adding UI components so light and dark modes stay consistent.
 
-After updating CodeMirror dependencies or the exported APIs in `scripts/vendor/codemirror.js`, run `npm run build:vendor` and commit the generated files. CodeMirror, esbuild, and Playwright are development dependencies; running the server does not require installing them. The editor and vendor bundle load only after authentication.
-
-## License
-
-[MIT](LICENSE) © 2026 shiqicao. Third-party attribution and license terms are listed in [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES).
+After updating CodeMirror dependencies or the exported APIs in `scripts/vendor/codemirror.js`, run `npm run build:vendor` and commit the generated files. CodeMirror, esbuild, and Playwright are development dependencies; running the server does not require installing them. The editor and vendor bundle load when the dashboard starts.
 
 ### Developing the CLI extension
 
@@ -191,4 +150,8 @@ Run `npm ci` and `npm run cli -- --no-open` to try the launcher from source. Use
 
 `npm run build:extension` builds a native standalone executable into `dist/`, embedding the UI, backend, Node runtime, and license notices. It uses Node's single-executable application support, esbuild, and postject; use Node 24.18.0 to match CI. The build fetches the matching Node license and leaves generated intermediates in `.build/`. `npm run test:extension` checks the actual binary and local GitHub CLI installation with isolated state and fake credentials. `npm run test:extension:browser` checks its browser UI on Linux using Playwright and fixture responses.
 
-The extension workflow tests native builds on each supported platform. Version tags (`v*`) publish the tested binaries as GitHub release assets; pull requests only build and test artifacts. A stable binary release is required before remote `gh extension install shiqicao/gh-pull` works.
+The extension workflow tests native builds on each supported platform. Version tags (`v*`) publish the tested binaries as GitHub release assets; pull requests only build and test artifacts. Published binaries are available on the [Releases page](https://github.com/shiqicao/gh-pull/releases).
+
+## License
+
+[MIT](LICENSE) © 2026 shiqicao. Third-party attribution and license terms are listed in [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES).
