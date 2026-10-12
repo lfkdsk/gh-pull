@@ -70,9 +70,14 @@ test('GitHub CLI can install and invoke the compiled extension locally', async t
   const target = join(repo, process.platform === 'win32' ? 'gh-pull.exe' : 'gh-pull');
   await copyFile(binary, target);
   await chmod(target, 0o755);
-  const env = { ...process.env, GH_CONFIG_DIR: join(dir, 'gh-config'), GH_TOKEN: 'fixture-unused-token', GITHUB_TOKEN: '' };
+  const env = {
+    ...process.env, GH_CONFIG_DIR: join(dir, 'gh-config'), XDG_DATA_HOME: join(dir, 'data'),
+    XDG_STATE_HOME: join(dir, 'state'), XDG_CACHE_HOME: join(dir, 'cache'),
+    GH_TOKEN: 'fixture-unused-token', GITHUB_TOKEN: '',
+  };
   await exec('git', ['init', repo], { env });
   await exec('gh', ['extension', 'install', '.'], { env, cwd: repo, timeout: 15_000 });
+  assert.ok((await stat(join(dir, 'data', 'gh', 'extensions', 'gh-pull'))).isDirectory(), 'Extension installation must stay inside the test directory');
   assert.match((await exec('gh', ['pull', '--version'], { env, cwd: tmpdir(), timeout: 10_000 })).stdout, /gh-pull/);
   assert.match((await exec('gh', ['pull', '--help'], { env, cwd: tmpdir(), timeout: 10_000 })).stdout, /gh pull stop/);
 });
