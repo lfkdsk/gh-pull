@@ -1,5 +1,6 @@
 import { createPollingSchedule, pendingPulls } from './polling.js';
 import { createViewedStore, createLatestRequest, mergePullPages } from './state.js';
+import { createIssuePopover } from './issues.js';
 import { element, icon, clipboardFeedback } from './ui.js';
 import { assignNameColors, NAME_COLOR_COUNT, groupPulls, labels, relativeTime } from './model.js';
 import { queryFromParams, queryPresets, setQueryPreset, normalizeQuery, queryError } from './query.js';
@@ -12,6 +13,7 @@ if (!queryError(appliedQuery)) appliedQuery = normalizeQuery(appliedQuery);
 let items = [], total = 0, cursor = null, more = false, limited = false, loading = false;
 const loads = createLatestRequest();
 const polling = createPollingSchedule();
+const issuePopover = createIssuePopover();
 let statusLoading = false, statusController, statusOffset = 0, loadedPages = 1;
 let events;
 let authMode = 'local', authenticated = false;
@@ -23,7 +25,7 @@ function scheduleMergeReadiness(attempt = 0) {
   if (polling.backingOff || document.hidden || !navigator.onLine || !authenticated || attempt >= 5 || !items.some(pr => pr.mergePending && pr.status === 'OPEN')) return;
   const version = loads.revision;
   readinessTimer = setTimeout(async () => {
-    if (polling.backingOff || statusLoading || document.hidden || !navigator.onLine || loading || titleEdits.size || [...draftChanges.values(), ...merges.values()].some(change => change.saving)) {
+    if (polling.backingOff || statusLoading || document.hidden || !navigator.onLine || loading || editingPull()) {
       scheduleMergeReadiness(attempt);
       return;
     }
@@ -75,7 +77,7 @@ function updateRefreshButton() {
 }
 
 function editingPull() {
-  return titleEdits.size || [...draftChanges.values(), ...merges.values()].some(change => change.saving);
+  return issuePopover.isOpen || titleEdits.size || [...draftChanges.values(), ...merges.values()].some(change => change.saving);
 }
 function responseError(response, data, fallback) {
   const error = new Error(data.error || fallback);
@@ -325,6 +327,7 @@ function titleEditor(pr) {
 }
 
 function render() {
+  issuePopover.close();
   const { count, groups } = groupPulls(items, { group: $('group').value, sort: 'query' });
   updateSummary();
   const fragment = document.createDocumentFragment();
@@ -488,6 +491,8 @@ function render() {
         comments.append(icon('comment', 14), document.createTextNode(String(pr.commentCount)));
         meta.append(comments);
       }
+      const issues = issuePopover.button(pr);
+      if (issues) meta.append(issues);
       for (const label of pr.labels) meta.append(badge(label, 'label'));
       const content = element('div', undefined, 'pr-content');
       content.append(line);

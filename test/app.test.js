@@ -482,3 +482,31 @@ test('status endpoint validates IDs, shares batches, invalidates stale searches 
   assert.equal(response.status, 429);
   assert.equal(response.headers.get('retry-after'), '120');
 });
+
+test('closing issues include titles, cross-repository links, states, totals and truncation in lists and status updates', async () => {
+  const calls = [];
+  const linked = node({ closingIssuesReferences: {
+    totalCount: 21, pageInfo: { hasNextPage: true }, nodes: [null, {
+      number: 123, title: 'Fix sign-in redirect', url: 'https://github.com/owner/other/issues/123',
+      state: 'OPEN', repository: { nameWithOwner: 'owner/other' },
+    }, {
+      number: 456, title: 'Handle expired sessions', url: 'https://github.com/owner/app/issues/456',
+      state: 'CLOSED', repository: { nameWithOwner: 'owner/app' },
+    }],
+  } });
+  const list = createGitHub({ getToken: async () => 'fixture', fetchImpl: async (url, options) => {
+    const request = JSON.parse(options.body); calls.push(request);
+    return Response.json({ data: { viewer: { login: 'alice', pullRequests: {
+      totalCount: 1, pageInfo: { hasNextPage: false }, nodes: [linked],
+    } }, nodes: [linked] } });
+  } });
+  for (const result of [await list(), await list.status(['one'])]) {
+    const pr = result.items[0];
+    assert.equal(pr.closingIssueCount, 21);
+    assert.equal(pr.closingIssuesTruncated, true);
+    assert.deepEqual(pr.closingIssues.map(issue => [issue.title, issue.repo, issue.state]), [
+      ['Fix sign-in redirect', 'owner/other', 'OPEN'], ['Handle expired sessions', 'owner/app', 'CLOSED'],
+    ]);
+  }
+  for (const call of calls) assert.match(call.query, /closingIssuesReferences\(first: 20\)/);
+});

@@ -52,6 +52,11 @@ export function normalizePullRequest(pr, viewerLogin) {
     additions: pr.additions, deletions: pr.deletions,
     changedFiles: pr.changedFiles ?? null,
     commentCount: pr.totalCommentsCount ?? null,
+    closingIssues: (pr.closingIssuesReferences?.nodes ?? []).filter(Boolean).map(issue => ({
+      number: issue.number, title: issue.title, url: issue.url, state: issue.state, repo: issue.repository.nameWithOwner,
+    })),
+    closingIssueCount: pr.closingIssuesReferences?.totalCount ?? 0,
+    closingIssuesTruncated: Boolean(pr.closingIssuesReferences?.pageInfo.hasNextPage),
     review: pr.reviewDecision || 'NONE',
     reviewers: reviewersFor(pr),
     reviewersTruncated: Boolean(pr.reviewRequests?.pageInfo.hasNextPage || pr.latestReviews?.pageInfo.hasNextPage),

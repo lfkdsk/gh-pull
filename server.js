@@ -14,6 +14,7 @@ const assets = new Map([
   ['/', ['index.html', 'text/html']],
   ['/app.js', ['app.js', 'text/javascript']],
   ['/model.js', ['model.js', 'text/javascript']],
+  ['/issues.js', ['issues.js', 'text/javascript']],
   ['/ui.js', ['ui.js', 'text/javascript']],
   ['/polling.js', ['polling.js', 'text/javascript']],
   ['/state.js', ['state.js', 'text/javascript']],

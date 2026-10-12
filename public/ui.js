@@ -30,7 +30,11 @@ export function icon(name, size = 16) {
       'stroke-linecap': 'round', 'stroke-linejoin': 'round',
     }),
   });
-  if (name === 'clock') {
+  if (name === 'issue' || name === 'issue-closed') {
+    svg.append(svgElement('circle', { cx: 8, cy: 8, r: 6 }));
+    svg.append(name === 'issue' ? svgElement('circle', { cx: 8, cy: 8, r: 1, fill: 'currentColor', stroke: 'none' })
+      : svgElement('path', { d: 'm5 8 2 2 4-4' }));
+  } else if (name === 'clock') {
     svg.append(svgElement('circle', { cx: 8, cy: 8, r: 6 }), svgElement('path', { d: 'M8 4v4l2.5 1.5' }));
   } else {
     if (!paths[name]) throw new Error(`Unknown icon: ${name}`);

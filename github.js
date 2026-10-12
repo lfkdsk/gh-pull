@@ -19,6 +19,10 @@ const fields = `id number title url state isDraft createdAt updatedAt headRefNam
   author { login } repository { nameWithOwner }
   ${mergeFields}
   additions deletions changedFiles totalCommentsCount reviewDecision
+  closingIssuesReferences(first: 20) {
+    totalCount pageInfo { hasNextPage }
+    nodes { number title url state repository { nameWithOwner } }
+  }
   reviewRequests(first: 100) {
     pageInfo { hasNextPage }
     nodes { requestedReviewer {
