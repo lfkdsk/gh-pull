@@ -69,6 +69,25 @@ export function queryPresets(query) {
   }));
 }
 
+// Search membership can lag behind a PR's current state. Enforce only the
+// state qualifiers we can evaluate from a returned row; GitHub owns the rest.
+export function matchesQueryState(pr, query) {
+  return tokenizeQuery(query).every(token => {
+    let matches;
+    if (['is', 'state'].includes(token.key)) {
+      if (token.value === 'open') matches = ['OPEN', 'DRAFT'].includes(pr.status);
+      if (token.value === 'closed') matches = ['CLOSED', 'MERGED'].includes(pr.status);
+      if (token.value === 'merged') matches = pr.status === 'MERGED';
+      if (token.value === 'unmerged') matches = pr.status !== 'MERGED';
+      if (token.value === 'draft' && ['OPEN', 'DRAFT'].includes(pr.status)) matches = pr.status === 'DRAFT';
+    }
+    if (token.key === 'draft' && ['true', 'false'].includes(token.value) && ['OPEN', 'DRAFT'].includes(pr.status)) {
+      matches = (pr.status === 'DRAFT') === (token.value === 'true');
+    }
+    return matches === undefined || (token.negative ? !matches : matches);
+  });
+}
+
 export function setQueryPreset(query, control, value) {
   if (!Object.hasOwn(presets, control) || !Object.hasOwn(presets[control], value)) return query;
   const tokens = tokenizeQuery(query);

@@ -25,6 +25,7 @@ async function fixture(t, options = {}) {
     if (hold) await hold;
     if (fail) throw new ApiError('GitHub: Search is temporarily unavailable.', 503);
     let items = args.cursor ? [pulls[1], pulls[2]] : pulls.slice(0, 2);
+    if (args.query.includes('is:closed')) items = items.map(pr => ({ ...pr, status: 'CLOSED' }));
     if (args.query.includes('no-results')) items = [];
     return { viewer: 'alice', total: items.length ? 3 : 0, items, limited: false,
       pageInfo: { hasNextPage: items.length > 0 && !args.cursor, endCursor: args.cursor ? null : 'page2' } };

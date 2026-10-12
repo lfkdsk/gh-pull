@@ -128,3 +128,16 @@ test('grouping preserves GitHub query ranking within groups', () => {
   const items = [{ id: 'b', repo: 'a/b', labels: [] }, { id: 'a', repo: 'a/b', labels: [] }];
   assert.deepEqual(groupPulls(items, { sort: 'query' }).groups[0][1], items);
 });
+
+test('state filters exclude stale search membership while keeping drafts and merged history', async () => {
+  const { matchesQueryState } = await import('../public/query.js');
+  const filter = query => ['OPEN', 'DRAFT', 'CLOSED', 'MERGED'].filter(status => matchesQueryState({ status }, query));
+  assert.deepEqual(filter('is:open'), ['OPEN', 'DRAFT']);
+  assert.deepEqual(filter('state:open draft:false'), ['OPEN']);
+  assert.deepEqual(filter('is:open draft:true'), ['DRAFT']);
+  assert.deepEqual(filter('is:closed'), ['CLOSED', 'MERGED']);
+  assert.deepEqual(filter('is:closed is:unmerged'), ['CLOSED']);
+  assert.deepEqual(filter('is:merged'), ['MERGED']);
+  assert.deepEqual(filter('-is:merged'), ['OPEN', 'DRAFT', 'CLOSED']);
+  assert.deepEqual(filter('repo:example/app'), ['OPEN', 'DRAFT', 'CLOSED', 'MERGED']);
+});

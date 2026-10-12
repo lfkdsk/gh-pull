@@ -145,3 +145,37 @@ test('tabs share list requests and receive local mutation invalidations over SSE
   assert.equal(calls, 2);
   await other.close();
 });
+
+test('merging in the open view stays removed through stale background/manual results and filter changes', async t => {
+  const stale = { ...pull, checks: 'SUCCESS', canMerge: true, headOid: 'a'.repeat(40), mergeMethod: 'SQUASH' };
+  const list = async () => pageOf([stale]); // GitHub search has not caught up yet.
+  const { page, origin } = await browserFixture(t, { list, merge: async () => ({
+    id: stale.id, status: 'MERGED', updatedAt: '2026-01-01T02:00:00Z', canMerge: false,
+  }) });
+  await page.clock.install();
+  await page.goto(origin); await page.locator('.pr-row').waitFor();
+  assert.equal(await page.locator('#state').inputValue(), 'open');
+  await page.click('.merge-action');
+  await page.waitForFunction(() => !document.querySelector('.pr-row'));
+  await page.clock.fastForward(1000);
+  await page.waitForFunction(() => !document.querySelector('#refresh').disabled);
+  assert.equal(await page.locator('.pr-row').count(), 0);
+  await page.click('#refresh');
+  await page.waitForFunction(() => !document.querySelector('#refresh').disabled);
+  assert.equal(await page.locator('.pr-row').count(), 0);
+  await page.selectOption('#state', 'all'); await page.locator('.pr-row').waitFor();
+  assert.equal(await page.locator('.title-line > .badge').first().textContent(), 'Merged');
+  assert.equal(await page.locator('.merge-action').count(), 0);
+  await page.selectOption('#state', 'open');
+  await page.waitForFunction(() => !document.querySelector('#refresh').disabled);
+  assert.equal(await page.locator('.pr-row').count(), 0);
+});
+
+test('a status refresh removes a PR merged elsewhere from the open view', async t => {
+  const f = await pollingFixture(t), { page } = f;
+  f.update({ status: 'MERGED', updatedAt: '2026-01-01T02:00:00Z' });
+  await page.clock.fastForward(15_000);
+  await page.waitForFunction(() => !document.querySelector('.pr-row'));
+  await page.clock.fastForward(1000); await f.idle();
+  assert.equal(await page.locator('.pr-row').count(), 0);
+});

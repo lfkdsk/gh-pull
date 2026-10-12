@@ -67,3 +67,17 @@ test('pagination deduplicates by PR ID, replaces updated records, and resets on 
   assert.deepEqual(mergePullPages(previous, incoming, false), incoming);
   assert.deepEqual(previous, [pr(1), pr(1, 'two')]);
 });
+
+test('confirmed merges survive removal and stale responses until the account changes', async () => {
+  const { createMergedStore } = await import('../public/state.js');
+  const store = createMergedStore();
+  const open = { ...pr(1), status: 'OPEN', canMerge: true };
+  assert.deepEqual(store.reconcile(open), open);
+  store.reconcile({ ...pr(2), status: 'MERGED' });
+  assert.equal(store.reconcile(open).status, 'MERGED');
+  assert.equal(store.reconcile(open).canMerge, false);
+  assert.equal(store.reconcile(open).updatedAt, pr(2).updatedAt);
+  assert.equal(store.reconcile({ ...open, updatedAt: pr(3).updatedAt }).updatedAt, pr(3).updatedAt);
+  store.clear();
+  assert.deepEqual(store.reconcile(open), open);
+});
