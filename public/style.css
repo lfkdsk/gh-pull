@@ -506,7 +506,7 @@ button, .pr-group > summary {
   color: var(--color-muted);
 }
 
-.updated-time, .comment-count, .branch-copy {
+.updated-time, .file-count, .comment-count, .branch-copy {
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -515,7 +515,7 @@ button, .pr-group > summary {
   background: var(--color-neutral-bg);
 }
 
-.updated-time, .comment-count {
+.updated-time, .file-count, .comment-count {
   white-space: nowrap;
 }
 
@@ -600,11 +600,11 @@ button, .pr-group > summary {
   color: var(--color-warning-text);
 }
 
-.comment-count {
+.file-count, .comment-count {
   font-variant-numeric: tabular-nums;
 }
 
-.comment-count svg {
+.file-count svg, .comment-count svg {
   flex-shrink: 0;
 }
 

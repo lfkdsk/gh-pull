@@ -424,14 +424,17 @@ test('ready endpoint enforces same-origin JSON and clears the cache after succes
 });
 
 
-test('comment totals are fetched for authored and search views, preserving zero and unknown counts', async () => {
+test('file and comment totals are fetched for authored and search views, preserving zero and unknown counts', async () => {
   const list = createGitHub({ getToken: async () => 'test', fetchImpl: async (url, options) => {
     assert.match(JSON.parse(options.body).query, /totalCommentsCount/);
+    assert.match(JSON.parse(options.body).query, /changedFiles/);
     const connection = { totalCount: 3, issueCount: 3, pageInfo: { hasNextPage: false },
-      nodes: [node({ totalCommentsCount: 12 }), node({ totalCommentsCount: 0 }), node({ totalCommentsCount: null })] };
+      nodes: [node({ totalCommentsCount: 12, changedFiles: 8 }), node({ totalCommentsCount: 0, changedFiles: 0 }), node({ totalCommentsCount: null })] };
     return Response.json({ data: { viewer: { login: 'alice', pullRequests: connection }, search: connection } });
   } });
   for (const scope of ['authored', 'involved', 'review']) {
-    assert.deepEqual((await list({ scope })).items.map(pr => pr.commentCount), [12, 0, null]);
+    const { items } = await list({ scope });
+    assert.deepEqual(items.map(pr => pr.commentCount), [12, 0, null]);
+    assert.deepEqual(items.map(pr => pr.changedFiles), [8, 0, null]);
   }
 });
