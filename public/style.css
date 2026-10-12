@@ -454,12 +454,13 @@ button, .pr-group > summary {
   margin: 8px 0 0;
 }
 
-.draft-action, .merge-action {
+.draft-action, .merge-action, .conflict-action {
   border: 0;
   line-height: inherit;
+  text-decoration: none;
 }
 
-.draft-action:hover:not(:disabled), .merge-action:hover:not(:disabled) {
+.draft-action:hover:not(:disabled), .merge-action:hover:not(:disabled), .conflict-action:hover {
   outline: 1px solid currentColor;
 }
 
@@ -506,7 +507,7 @@ button, .pr-group > summary {
   color: var(--color-muted);
 }
 
-.updated-time, .comment-count, .branch-copy {
+.updated-time, .comment-count, .branch-copy, .issue-count {
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -529,7 +530,7 @@ button, .pr-group > summary {
   text-align: left;
 }
 
-.branch-copy:hover {
+.branch-copy:hover, .issue-count:hover {
   color: var(--color-accent);
 }
 
@@ -677,3 +678,40 @@ input:focus, select:focus, textarea:focus {
     padding: 24px;
   }
 }
+
+/* Closing issues: compact metadata trigger, readable titles on demand. */
+.issue-count {
+  border: 0;
+  background: var(--color-info-bg);
+  color: var(--color-accent);
+  font: inherit;
+  white-space: nowrap;
+}
+.issue-popover {
+  position: fixed;
+  inset: auto;
+  margin: 0;
+  padding: 12px;
+  width: min(380px, calc(100vw - 16px));
+  max-height: min(420px, calc(100dvh - 16px));
+  overflow: auto;
+  color: var(--color-text);
+  background: var(--color-page);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-panel);
+  box-shadow: 0 8px 24px #0003;
+  font-size: var(--font-size-body);
+}
+.issue-popover.measuring { display: block; visibility: hidden; pointer-events: none; }
+.issue-popover h2 { margin: 0 0 8px; font-size: var(--font-size-body); }
+.issue-list { list-style: none; margin: 0; padding: 0; }
+.issue-list li { display: flex; gap: 8px; padding: 8px 0; }
+.issue-list li + li { border-top: 1px solid var(--color-divider); }
+.issue-symbol { flex-shrink: 0; padding-top: 2px; }
+.issue-symbol.issue-open { color: var(--color-success-text); }
+.issue-symbol.issue-closed { color: var(--color-merged-text); }
+.issue-link { display: grid; min-width: 0; gap: 3px; text-decoration: none; }
+.issue-title { color: var(--color-text); overflow-wrap: anywhere; }
+.issue-link:hover .issue-title { color: var(--color-accent); }
+.issue-detail { color: var(--color-muted); font-size: var(--font-size-small); overflow-wrap: anywhere; }
+.issue-more { display: inline-block; margin-top: 8px; color: var(--color-accent); }

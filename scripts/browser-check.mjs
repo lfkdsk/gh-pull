@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { browserFixture } from './browser-fixture.mjs';
 import { ApiError } from '../github.js';
 
-async function fixture(t) {
+async function fixture(t, overrides = {}) {
   let pr = {
     id: 'fixture-pr', number: 1, title: 'Improve keyboard navigation',
     url: 'https://github.com/example/dashboard/pull/1', repo: 'example/dashboard',
@@ -12,6 +12,7 @@ async function fixture(t) {
     additions: 520, deletions: 148, changedFiles: 8, commentCount: 12, review: 'NONE',
     checks: 'SUCCESS', reviewers: [], labels: [], canMerge: true,
     headOid: 'a'.repeat(40), mergeMethod: 'SQUASH',
+    ...overrides,
   };
   let reject = false, hour = 1, hold, release;
   const list = async ({ query = '' } = {}) => {
@@ -54,11 +55,41 @@ async function fixture(t) {
   return {
     page, open, unread, waitRead, refresh, errors,
     reject: value => { reject = value; },
-    laterUpdate: () => update({}),
+    laterUpdate: (fields = {}) => update(fields),
     holdRefresh: () => { hold = new Promise(resolve => { release = resolve; }); },
     releaseRefresh: () => { release(); hold = null; },
   };
 }
+
+test('conflicting PRs link to resolution in place of merge and update after refresh', async t => {
+  const f = await fixture(t, { hasConflicts: true, canMerge: false });
+  await f.open();
+  const resolve = f.page.locator('.conflict-action');
+  assert.equal(await resolve.textContent(), 'Resolve conflict');
+  assert.equal(await resolve.getAttribute('href'), 'https://github.com/example/dashboard/pull/1/conflicts');
+  assert.equal(await resolve.getAttribute('target'), '_blank');
+  assert.equal(await f.page.locator('.merge-action').count(), 0);
+  f.laterUpdate({ hasConflicts: false, canMerge: true });
+  await f.refresh();
+  assert.equal(await resolve.count(), 0);
+  assert.equal(await f.page.locator('.merge-action').count(), 1);
+  for (const changes of [{ status: 'MERGED' }, { status: 'DRAFT' }, { status: 'OPEN', author: 'bob' }]) {
+    f.laterUpdate({ ...changes, hasConflicts: true, canMerge: false });
+    await f.refresh();
+    assert.equal(await resolve.count(), 0);
+  }
+});
+
+test('review badges distinguish bypass permission from required reviews', async t => {
+  for (const review of ['REVIEW_BYPASS_AVAILABLE', 'REVIEW_REQUIRED']) {
+    const { page, open } = await fixture(t, { review, canMerge: false });
+    await open();
+    const badge = page.locator(`.badge.${review.toLowerCase()}`);
+    assert.equal(await badge.textContent(), review === 'REVIEW_REQUIRED' ? 'Review required' : 'Review bypass available');
+    if (review === 'REVIEW_BYPASS_AVAILABLE') assert.match(await badge.getAttribute('title'), /your account can bypass/);
+    assert.equal(await page.locator('.merge-action').count(), 0);
+  }
+});
 
 test('title, draft, ready and merge interactions preserve read state and retry behavior', async t => {
   const f = await fixture(t), { page } = f;

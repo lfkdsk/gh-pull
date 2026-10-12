@@ -12,7 +12,8 @@ export function mergeOptions(pr, viewerLogin) {
   const mergePending = Boolean(viewerLogin && pr.author?.login?.toLowerCase() === viewerLogin.toLowerCase() && pr.state === 'OPEN' && !pr.isDraft &&
     !pr.mergeQueue && !pr.stackEntry && ['WRITE', 'MAINTAIN', 'ADMIN'].includes(repo.viewerPermission) && methods.length &&
     (pr.mergeable === 'UNKNOWN' || pr.mergeStateStatus === 'UNKNOWN'));
-  return { canMerge, mergePending, headOid: pr.headRefOid, mergeMethod: methods.includes(repo.viewerDefaultMergeMethod) ? repo.viewerDefaultMergeMethod : methods[0] };
+  const hasConflicts = pr.state === 'OPEN' && (pr.mergeable === 'CONFLICTING' || pr.mergeStateStatus === 'DIRTY');
+  return { canMerge, mergePending, hasConflicts, headOid: pr.headRefOid, mergeMethod: methods.includes(repo.viewerDefaultMergeMethod) ? repo.viewerDefaultMergeMethod : methods[0] };
 }
 
 function checkCountsFor(pr) {
@@ -42,6 +43,13 @@ export function reviewersFor(pr) {
   return [...reviewers.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
 
+// GitHub reports repository review requirements even when this viewer can
+// bypass them. Keep that distinction in presentation, never in merge policy.
+export function reviewState(pr) {
+  return pr.reviewDecision === 'REVIEW_REQUIRED' && pr.viewerCanMergeAsAdmin === true
+    ? 'REVIEW_BYPASS_AVAILABLE' : pr.reviewDecision || 'NONE';
+}
+
 export function normalizePullRequest(pr, viewerLogin) {
   return {
     ...mergeOptions(pr, viewerLogin),
@@ -52,7 +60,12 @@ export function normalizePullRequest(pr, viewerLogin) {
     additions: pr.additions, deletions: pr.deletions,
     changedFiles: pr.changedFiles ?? null,
     commentCount: pr.totalCommentsCount ?? null,
-    review: pr.reviewDecision || 'NONE',
+    closingIssues: (pr.closingIssuesReferences?.nodes ?? []).filter(Boolean).map(issue => ({
+      number: issue.number, title: issue.title, url: issue.url, state: issue.state, repo: issue.repository.nameWithOwner,
+    })),
+    closingIssueCount: pr.closingIssuesReferences?.totalCount ?? 0,
+    closingIssuesTruncated: Boolean(pr.closingIssuesReferences?.pageInfo.hasNextPage),
+    review: reviewState(pr),
     reviewers: reviewersFor(pr),
     reviewersTruncated: Boolean(pr.reviewRequests?.pageInfo.hasNextPage || pr.latestReviews?.pageInfo.hasNextPage),
     checks: pr.commits.nodes[0]?.commit.statusCheckRollup?.state ?? 'NONE',

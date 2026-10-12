@@ -1,10 +1,10 @@
 import { ApiError, createGraphQLClient } from './github-client.js';
-import { mergeOptions, normalizePullRequest } from './pull-request.js';
+import { mergeOptions, normalizePullRequest, reviewState } from './pull-request.js';
 
 // Preserve the service API used by the server and existing integrations.
 export { ApiError } from './github-client.js';
 export { mergeOptions, reviewersFor } from './pull-request.js';
-const mergeFields = `headRefOid mergeable mergeStateStatus mergeQueue { id } stackEntry { id }
+const mergeFields = `viewerCanMergeAsAdmin headRefOid mergeable mergeStateStatus mergeQueue { id } stackEntry { id }
   repository { nameWithOwner viewerPermission viewerDefaultMergeMethod mergeCommitAllowed squashMergeAllowed rebaseMergeAllowed }`;
 
 export function validateMerge(input) {
@@ -19,6 +19,10 @@ const fields = `id number title url state isDraft createdAt updatedAt headRefNam
   author { login } repository { nameWithOwner }
   ${mergeFields}
   additions deletions changedFiles totalCommentsCount reviewDecision
+  closingIssuesReferences(first: 20) {
+    totalCount pageInfo { hasNextPage }
+    nodes { number title url state repository { nameWithOwner } }
+  }
   reviewRequests(first: 100) {
     pageInfo { hasNextPage }
     nodes { requestedReviewer {
@@ -129,7 +133,7 @@ export function createGitHub(options = {}) {
         commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
       } }
     }`, { ids });
-    return { items: await withMergeAccess(data.nodes.filter(pr => pr?.id).map(pr => ({ id: pr.id, repo: pr.repository?.nameWithOwner, ...mergeOptions(pr, data.viewer.login) }))) };
+    return { items: await withMergeAccess(data.nodes.filter(pr => pr?.id).map(pr => ({ id: pr.id, repo: pr.repository?.nameWithOwner, ...mergeOptions(pr, data.viewer.login), review: reviewState(pr) }))) };
   };
 
   list.merge = async input => {
@@ -165,7 +169,7 @@ export function createGitHub(options = {}) {
   };
   async function setDraftState(input, draft) {
     const { id } = validateDraftUpdate(input);
-    const draftFields = 'id state isDraft updatedAt reviewDecision';
+    const draftFields = 'id state isDraft updatedAt reviewDecision viewerCanMergeAsAdmin';
     let { pr } = await ownedPullRequest(id, `${draftFields} author { login }`, 'You can only change the draft status of your own pull requests.');
     if (pr.state !== 'OPEN') throw new ApiError('Only open pull requests can change draft status. Refresh to see the latest status.', 409);
     if (pr.isDraft !== draft) {
@@ -177,7 +181,7 @@ export function createGitHub(options = {}) {
       pr = data[mutation]?.pullRequest;
       if (pr?.isDraft !== draft || pr.state !== 'OPEN') throw new ApiError('GitHub did not confirm the status change. Refresh to check its status.');
     }
-    return { id: pr.id, status: draft ? 'DRAFT' : 'OPEN', updatedAt: pr.updatedAt, review: pr.reviewDecision || 'NONE' };
+    return { id: pr.id, status: draft ? 'DRAFT' : 'OPEN', updatedAt: pr.updatedAt, review: reviewState(pr) };
   }
   list.convertToDraft = input => setDraftState(input, true);
   list.markReadyForReview = input => setDraftState(input, false);

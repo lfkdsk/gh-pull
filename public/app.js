@@ -1,5 +1,6 @@
 import { createPollingSchedule, pendingPulls } from './polling.js';
 import { createViewedStore, createLatestRequest, mergePullPages, createMergedStore } from './state.js';
+import { createIssuePopover } from './issues.js';
 import { element, icon, clipboardFeedback } from './ui.js';
 import { assignNameColors, NAME_COLOR_COUNT, groupPulls, labels, relativeTime } from './model.js';
 import { queryFromParams, queryPresets, setQueryPreset, normalizeQuery, queryError, matchesQueryState } from './query.js';
@@ -13,6 +14,7 @@ let items = [], total = 0, cursor = null, more = false, limited = false, loading
 const loads = createLatestRequest();
 const mergedStore = createMergedStore();
 const polling = createPollingSchedule();
+const issuePopover = createIssuePopover();
 let statusLoading = false, statusController, statusOffset = 0, loadedPages = 1;
 let events;
 let authMode = 'local', authenticated = false;
@@ -24,7 +26,7 @@ function scheduleMergeReadiness(attempt = 0) {
   if (polling.backingOff || document.hidden || !navigator.onLine || !authenticated || attempt >= 5 || !items.some(pr => pr.mergePending && pr.status === 'OPEN')) return;
   const version = loads.revision;
   readinessTimer = setTimeout(async () => {
-    if (polling.backingOff || statusLoading || document.hidden || !navigator.onLine || loading || titleEdits.size || [...draftChanges.values(), ...merges.values()].some(change => change.saving)) {
+    if (polling.backingOff || statusLoading || document.hidden || !navigator.onLine || loading || editingPull()) {
       scheduleMergeReadiness(attempt);
       return;
     }
@@ -76,7 +78,7 @@ function updateRefreshButton() {
 }
 
 function editingPull() {
-  return titleEdits.size || [...draftChanges.values(), ...merges.values()].some(change => change.saving);
+  return issuePopover.isOpen || titleEdits.size || [...draftChanges.values(), ...merges.values()].some(change => change.saving);
 }
 function responseError(response, data, fallback) {
   const error = new Error(data.error || fallback);
@@ -193,9 +195,22 @@ window.addEventListener('storage', event => {
 
 function badge(text, kind) { return element('span', text, `badge ${kind.toLowerCase()}`); }
 
-// Keep merge availability, pending state, and app-access messaging together.
-function createMergeAction(pr) {
-  if (pr.status !== 'OPEN' || !pr.canMerge || pr.author.toLowerCase() !== viewerLogin.toLowerCase()) return null;
+// Keep conflict resolution, merge availability, and app-access messaging together.
+function createMergeAction(pr, prUrl) {
+  if (pr.status !== 'OPEN' || pr.author.toLowerCase() !== viewerLogin.toLowerCase()) return null;
+  if (pr.hasConflicts) {
+    if (!prUrl) return null;
+    const resolve = element('a', 'Resolve conflict', 'badge review_required conflict-action');
+    const url = new URL(prUrl);
+    url.pathname = `${url.pathname.replace(/\/$/, '')}/conflicts`;
+    url.search = ''; url.hash = '';
+    resolve.href = url.href;
+    resolve.target = '_blank'; resolve.rel = 'noopener noreferrer';
+    resolve.dataset.viewPr = '';
+    resolve.title = 'Resolve merge conflicts on GitHub (opens in a new tab)';
+    return resolve;
+  }
+  if (!pr.canMerge) return null;
   const actions = document.createDocumentFragment();
   const method = { MERGE: 'Merge', SQUASH: 'Squash and merge', REBASE: 'Rebase and merge' }[pr.mergeMethod];
   const merge = element('button', merges.get(pr.id)?.saving ? 'Merging…' : method, 'badge open merge-action');
@@ -363,6 +378,7 @@ function titleEditor(pr) {
 }
 
 function render() {
+  issuePopover.close();
   const { count, groups } = groupPulls(items, { group: $('group').value, sort: 'query' });
   updateSummary();
   const fragment = document.createDocumentFragment();
@@ -446,7 +462,7 @@ function render() {
         });
         line.append(edit);
       }
-      const mergeAction = createMergeAction(pr);
+      const mergeAction = createMergeAction(pr, title.getAttribute('href'));
       if (mergeAction) line.append(mergeAction);
       const meta = element('div', undefined, 'meta');
       let checks = badge(labels[pr.checks] ?? pr.checks, pr.checks);
@@ -482,8 +498,10 @@ function render() {
         meta.append(branch);
       }
       if (pr.review !== 'NONE') {
-        const review = { APPROVED: 'Approved', CHANGES_REQUESTED: 'Changes requested', REVIEW_REQUIRED: 'Review required' };
-        meta.append(badge(review[pr.review] ?? pr.review, pr.review));
+        const review = { APPROVED: 'Approved', CHANGES_REQUESTED: 'Changes requested', REVIEW_REQUIRED: 'Review required', REVIEW_BYPASS_AVAILABLE: 'Review bypass available' };
+        const reviewBadge = badge(review[pr.review] ?? pr.review, pr.review);
+        if (pr.review === 'REVIEW_BYPASS_AVAILABLE') reviewBadge.title = 'GitHub requires reviews for this branch, but your account can bypass branch protections.';
+        meta.append(reviewBadge);
       }
       const age = relativeTime(pr.updatedAt);
       const time = element('time', undefined, 'updated-time');
@@ -503,6 +521,8 @@ function render() {
         comments.append(icon('comment', 14), document.createTextNode(String(pr.commentCount)));
         meta.append(comments);
       }
+      const issues = issuePopover.button(pr);
+      if (issues) meta.append(issues);
       for (const label of pr.labels) meta.append(badge(label, 'label'));
       const content = element('div', undefined, 'pr-content');
       content.append(line);
