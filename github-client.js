@@ -34,7 +34,7 @@ export function createGraphQLClient({ fetchImpl = fetch, getToken = defaultToken
   };
 }
 
-async function defaultToken() {
+export async function defaultToken() {
   if (process.env.GH_TOKEN || process.env.GITHUB_TOKEN) return process.env.GH_TOKEN || process.env.GITHUB_TOKEN;
   try {
     const { stdout } = await exec('gh', ['auth', 'token', '--hostname', 'github.com'], { timeout: 10_000 });

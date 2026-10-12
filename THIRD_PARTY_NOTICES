@@ -39,3 +39,10 @@ https://github.com/rsms/inter/releases/tag/v4.1
 Copyright (c) 2016 The Inter Project Authors (https://github.com/rsms/inter)
 Licensed under the SIL Open Font License 1.1.
 The unmodified font and full license are included in public/fonts/.
+
+---
+
+The standalone CLI extension bundles Node.js and proper-lockfile with its
+dependencies (graceful-fs, retry, and signal-exit). Full license texts, including
+the runtime's third-party notices, are embedded at build time and available with
+`gh pull --licenses`. esbuild and postject are build tools only.

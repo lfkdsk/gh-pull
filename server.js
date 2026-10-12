@@ -1,3 +1,4 @@
+import { isSea, getAsset } from 'node:sea';
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
@@ -33,7 +34,7 @@ const mutations = new Map([
   ['/api/pulls/merge', { method: 'merge', validate: validateMerge, unavailable: 'Status changes are unavailable.' }],
 ]);
 
-export function createApp({ list = createGitHub(), updateTitle = list.updateTitle, convertToDraft = list.convertToDraft, markReadyForReview = list.markReadyForReview, merge = list.merge, config = { mode: 'local' }, authOptions, deploymentEnv = process.env } = {}) {
+export function createApp({ list = createGitHub(), updateTitle = list.updateTitle, convertToDraft = list.convertToDraft, markReadyForReview = list.markReadyForReview, merge = list.merge, config = { mode: 'local' }, localControl, authOptions, deploymentEnv = process.env } = {}) {
   const sha = deploymentEnv.RAILWAY_GIT_COMMIT_SHA;
   const owner = deploymentEnv.RAILWAY_GIT_REPO_OWNER;
   const repo = deploymentEnv.RAILWAY_GIT_REPO_NAME;
@@ -66,6 +67,13 @@ export function createApp({ list = createGitHub(), updateTitle = list.updateTitl
     const navigation = auth && req.method === 'GET' && ['/', '/auth/login', '/auth/callback'].includes(url.pathname);
     if ((req.headers.origin && req.headers.origin !== origin && !navigation) ||
         (req.headers['sec-fetch-site'] === 'cross-site' && !navigation)) return send(403, { error: 'Same-origin requests only.' });
+    if (!auth && localControl && url.pathname === '/api/cli') {
+      if (req.headers.authorization !== `Bearer ${localControl.token}`) return send(403, { error: 'Invalid control token.' });
+      if (!['GET', 'POST'].includes(req.method)) return send(405, { error: 'Method not allowed.' });
+      send(200, { app: 'gh-pull', version: localControl.version });
+      if (req.method === 'POST') res.once('finish', () => localControl.stop().catch(() => { process.exitCode = 1; }));
+      return;
+    }
     try {
       const sessionSend = (status, body) => send(status, url.pathname === '/api/session' && status === 200 && version ? { ...body, version } : body);
       if (auth && await auth.handle(req, res, url, sessionSend)) return;
@@ -125,7 +133,7 @@ export function createApp({ list = createGitHub(), updateTitle = list.updateTitl
       }
       const asset = assets.get(url.pathname);
       if (!asset) return send(404, { error: 'Not found.' });
-      let body = await readFile(new URL(`./public/${asset[0]}`, import.meta.url));
+      let body = isSea() ? Buffer.from(getAsset(`public/${asset[0]}`)) : await readFile(new URL(`./public/${asset[0]}`, import.meta.url));
       if (url.pathname === '/') {
         // CodeMirror mounts nonce-authorized style sheets. Browsers also copy
         // token colors into style attributes while editing contenteditable text.
@@ -144,7 +152,7 @@ export function createApp({ list = createGitHub(), updateTitle = list.updateTitl
   });
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (!isSea() && process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const port = Number(process.env.PORT || 3000);
   const config = authConfig();
   const app = createApp({ config });
