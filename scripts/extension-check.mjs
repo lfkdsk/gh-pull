@@ -77,7 +77,9 @@ test('GitHub CLI can install and invoke the compiled extension locally', async t
   };
   await exec('git', ['init', repo], { env });
   await exec('gh', ['extension', 'install', '.'], { env, cwd: repo, timeout: 15_000 });
-  assert.ok((await stat(join(dir, 'data', 'gh', 'extensions', 'gh-pull'))).isDirectory(), 'Extension installation must stay inside the test directory');
+  // gh uses a directory symlink on Unix and a path-pointer file on Windows.
+  const installed = await stat(join(dir, 'data', 'gh', 'extensions', 'gh-pull'));
+  assert.ok(installed.isDirectory() || installed.isFile(), 'Extension installation must stay inside the test directory');
   assert.match((await exec('gh', ['pull', '--version'], { env, cwd: tmpdir(), timeout: 10_000 })).stdout, /gh-pull/);
   assert.match((await exec('gh', ['pull', '--help'], { env, cwd: tmpdir(), timeout: 10_000 })).stdout, /gh pull stop/);
 });
