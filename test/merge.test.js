@@ -178,3 +178,17 @@ test('readiness preserves mergeability while separately reporting missing hosted
   assert.equal(result.canMerge, true);
   assert.equal(result.mergeAccess.allowed, false);
 });
+
+test('review badges distinguish bypass permission without relaxing merge safety', async () => {
+  const { reviewState } = await import('../pull-request.js');
+  assert.equal(reviewState({ reviewDecision: 'REVIEW_REQUIRED', viewerCanMergeAsAdmin: true }), 'REVIEW_BYPASS_AVAILABLE');
+  for (const viewerCanMergeAsAdmin of [false, undefined]) {
+    assert.equal(reviewState({ reviewDecision: 'REVIEW_REQUIRED', viewerCanMergeAsAdmin }), 'REVIEW_REQUIRED');
+  }
+  for (const reviewDecision of ['APPROVED', 'CHANGES_REQUESTED', null]) {
+    assert.equal(reviewState({ reviewDecision, viewerCanMergeAsAdmin: true }), reviewDecision || 'NONE');
+  }
+  for (const mergeStateStatus of ['DIRTY', 'BLOCKED', 'UNKNOWN']) {
+    assert.equal(mergeOptions({ ...ready, viewerCanMergeAsAdmin: true, mergeStateStatus }, 'alice').canMerge, false);
+  }
+});

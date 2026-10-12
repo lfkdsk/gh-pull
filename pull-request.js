@@ -42,6 +42,13 @@ export function reviewersFor(pr) {
   return [...reviewers.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
 
+// GitHub reports repository review requirements even when this viewer can
+// bypass them. Keep that distinction in presentation, never in merge policy.
+export function reviewState(pr) {
+  return pr.reviewDecision === 'REVIEW_REQUIRED' && pr.viewerCanMergeAsAdmin === true
+    ? 'REVIEW_BYPASS_AVAILABLE' : pr.reviewDecision || 'NONE';
+}
+
 export function normalizePullRequest(pr, viewerLogin) {
   return {
     ...mergeOptions(pr, viewerLogin),
@@ -57,7 +64,7 @@ export function normalizePullRequest(pr, viewerLogin) {
     })),
     closingIssueCount: pr.closingIssuesReferences?.totalCount ?? 0,
     closingIssuesTruncated: Boolean(pr.closingIssuesReferences?.pageInfo.hasNextPage),
-    review: pr.reviewDecision || 'NONE',
+    review: reviewState(pr),
     reviewers: reviewersFor(pr),
     reviewersTruncated: Boolean(pr.reviewRequests?.pageInfo.hasNextPage || pr.latestReviews?.pageInfo.hasNextPage),
     checks: pr.commits.nodes[0]?.commit.statusCheckRollup?.state ?? 'NONE',

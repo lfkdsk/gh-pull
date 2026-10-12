@@ -478,8 +478,10 @@ function render() {
         meta.append(branch);
       }
       if (pr.review !== 'NONE') {
-        const review = { APPROVED: 'Approved', CHANGES_REQUESTED: 'Changes requested', REVIEW_REQUIRED: 'Review required' };
-        meta.append(badge(review[pr.review] ?? pr.review, pr.review));
+        const review = { APPROVED: 'Approved', CHANGES_REQUESTED: 'Changes requested', REVIEW_REQUIRED: 'Review required', REVIEW_BYPASS_AVAILABLE: 'Review bypass available' };
+        const reviewBadge = badge(review[pr.review] ?? pr.review, pr.review);
+        if (pr.review === 'REVIEW_BYPASS_AVAILABLE') reviewBadge.title = 'GitHub requires reviews for this branch, but your account can bypass branch protections.';
+        meta.append(reviewBadge);
       }
       const age = relativeTime(pr.updatedAt);
       const time = element('time', undefined, 'updated-time');
