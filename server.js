@@ -6,6 +6,7 @@ import { resolve } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { toGitHubQuery } from './public/query.js';
 import { createGitHub, ApiError, validateTitleUpdate, validateDraftUpdate, validateMerge } from './github.js';
+import { cachedRequest } from './request-cache.js';
 import { authConfig, createAuth } from './auth.js';
 import { createMarketplaceWebhook } from './marketplace.js';
 
@@ -14,6 +15,7 @@ const assets = new Map([
   ['/app.js', ['app.js', 'text/javascript']],
   ['/model.js', ['model.js', 'text/javascript']],
   ['/ui.js', ['ui.js', 'text/javascript']],
+  ['/polling.js', ['polling.js', 'text/javascript']],
   ['/state.js', ['state.js', 'text/javascript']],
   ['/query.js', ['query.js', 'text/javascript']],
   ['/query-editor.js', ['query-editor.js', 'text/javascript']],
@@ -44,6 +46,7 @@ export function createApp({ list = createGitHub(), updateTitle = list.updateTitl
       ? `https://github.com/${owner}/${repo}/commit/${sha}` : null,
   } : null;
   const localCache = new Map();
+  const subscribers = new Map();
   const auth = config.mode === 'github-app' ? createAuth(config, authOptions) : null;
   const marketplace = auth ? createMarketplaceWebhook({ secret: config.marketplaceWebhookSecret, cancel: auth.cancelMarketplace }) : null;
   return createServer(async (req, res) => {
@@ -101,13 +104,37 @@ export function createApp({ list = createGitHub(), updateTitle = list.updateTitl
         if (!mutate) throw new ApiError(mutation.unavailable, 503);
         const result = await mutate(input);
         cache.clear();
+        for (const stream of subscribers.get(cache) ?? []) stream.write('event: invalidate\ndata: {}\n\n');
         return send(200, result);
       }
       if (req.method !== 'GET') return send(405, { error: 'Method not allowed.' });
-      if (url.pathname === '/api/pulls/readiness') {
+      if (url.pathname === '/api/events') {
+        res.writeHead(200, { 'Content-Type': 'text/event-stream', 'X-Accel-Buffering': 'no' });
+        res.write(': connected\n\n');
+        const streams = subscribers.get(cache) ?? new Set();
+        subscribers.set(cache, streams); streams.add(res);
+        const heartbeat = setInterval(() => res.write(': heartbeat\n\n'), 25_000);
+        res.on('close', () => {
+          clearInterval(heartbeat); streams.delete(res);
+          if (!streams.size) subscribers.delete(cache);
+        });
+        return;
+      }
+      if (['/api/pulls/readiness', '/api/pulls/status'].includes(url.pathname)) {
         const ids = url.searchParams.getAll('id');
         if (!ids.length || ids.length > 50 || ids.some(id => !id.trim() || id.length > 200)) return send(400, { error: 'Provide 1–50 valid PR IDs.' });
-        return send(200, await activeList.mergeReadiness(ids));
+        const kind = url.pathname.endsWith('/status') ? 'status' : 'mergeReadiness';
+        if (!activeList[kind]) return send(200, { items: [] });
+        const key = JSON.stringify([kind, [...new Set(ids)].sort()]);
+        return send(200, await cachedRequest(cache, key, async () => {
+          const result = await activeList[kind](ids);
+          // A node refresh can reveal changes before search's cached page expires.
+          // Reconcile query membership through a fresh search on the next list read.
+          if (kind === 'status') for (const cachedKey of cache.keys()) {
+            if (!['status', 'mergeReadiness'].includes(JSON.parse(cachedKey)[0])) cache.delete(cachedKey);
+          }
+          return result;
+        }, { ttl: kind === 'status' ? 10_000 : 1000 }));
       }
       if (url.pathname === '/api/pulls') {
         const scope = url.searchParams.get('scope') ?? 'authored';
@@ -122,14 +149,9 @@ export function createApp({ list = createGitHub(), updateTitle = list.updateTitl
           catch (error) { return send(400, { error: error.message }); }
         }
         const key = JSON.stringify(query === undefined ? [scope, state, cursor] : ['query', query, cursor]);
-        let entry = cache.get(key);
-        if (!entry || entry.expires < Date.now() || url.searchParams.get('refresh') === '1') {
-          entry = { result: activeList(query === undefined ? { scope, state, cursor } : { query, cursor }), expires: Date.now() + 30_000 };
-          cache.set(key, entry);
-          if (cache.size > 100) cache.delete(cache.keys().next().value);
-        }
-        try { return send(200, await entry.result); }
-        catch (error) { if (cache.get(key) === entry) cache.delete(key); throw error; }
+        return send(200, await cachedRequest(cache, key,
+          () => activeList(query === undefined ? { scope, state, cursor } : { query, cursor }),
+          { ttl: 25_000, force: url.searchParams.get('refresh') === '1' }));
       }
       const asset = assets.get(url.pathname);
       if (!asset) return send(404, { error: 'Not found.' });
@@ -147,6 +169,7 @@ export function createApp({ list = createGitHub(), updateTitle = list.updateTitl
       res.end(body);
     } catch (error) {
       if (auth && error.status === 401) auth.invalidate(req, res);
+      if (error.retryAfter) res.setHeader('Retry-After', String(error.retryAfter));
       send(error instanceof ApiError ? error.status : 500, { error: error instanceof ApiError ? error.message : 'Something went wrong. Please retry.' });
     }
   });

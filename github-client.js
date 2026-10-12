@@ -8,8 +8,21 @@ export class ApiError extends Error {
 }
 
 export function createGraphQLClient({ fetchImpl = fetch, getToken = defaultToken, cacheToken = true, authError = 'GitHub login expired. Run gh auth login, then retry.' } = {}) {
-  let token;
+  let token, retryAt = 0;
+  function rateLimit(response) {
+    const after = response.headers.get('retry-after');
+    const seconds = after && Number.isFinite(Number(after)) ? Number(after) : (Date.parse(after) - Date.now()) / 1000;
+    const reset = response.headers.get('x-ratelimit-remaining') === '0' ? Number(response.headers.get('x-ratelimit-reset')) * 1000 : 0;
+    retryAt = Math.max(Date.now() + Math.max(60, Number.isFinite(seconds) ? seconds : 0) * 1000, reset || 0);
+    return throttled();
+  }
+  function throttled() {
+    const error = new ApiError('GitHub rate limit reached. Refresh will retry automatically.', 429);
+    error.retryAfter = Math.max(1, Math.ceil((retryAt - Date.now()) / 1000));
+    return error;
+  }
   return async function graphql(query, variables) {
+    if (Date.now() < retryAt) throw throttled();
     if (!cacheToken || !token) token = await getToken();
     let response;
     try {
@@ -25,10 +38,15 @@ export function createGraphQLClient({ fetchImpl = fetch, getToken = defaultToken
       throw new ApiError(authError, 401);
     }
     if (response.status === 403 || response.status === 429) {
-      throw new ApiError('GitHub denied the request or its rate limit was reached. Check your token permissions or retry later.', 429);
+      if (response.status === 429 || response.headers.has('retry-after') || response.headers.get('x-ratelimit-remaining') === '0') throw rateLimit(response);
+      throw new ApiError('GitHub denied the request. Check your token permissions.', 403);
     }
     if (!response.ok) throw new ApiError(`GitHub returned HTTP ${response.status}. Retry shortly.`);
     const payload = await response.json();
+    if (payload.errors?.some(error => error.type === 'RATE_LIMITED')) throw rateLimit(response);
+    // A successful response may consume the last available point. Share its cooldown
+    // across tabs and query keys before sending any further requests.
+    if (response.headers.get('x-ratelimit-remaining') === '0') rateLimit(response);
     if (payload.errors?.length) throw new ApiError(`GitHub: ${payload.errors.map(error => error.message).join('; ')}`);
     return payload.data;
   };

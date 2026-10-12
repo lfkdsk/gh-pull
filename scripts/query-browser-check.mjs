@@ -149,6 +149,7 @@ test('autocomplete keyboard, mid-query replacements, escaped input, undo and foc
 });
 
 test('invalid drafts are local, failed searches can retry, pagination preserves query and refresh preserves drafts', async t => {
+  t.mock.timers.enable({ apis: ['Date'] });
   const f = await fixture(t), { page, editor, calls } = f;
   await page.clock.install();
   await f.open();
@@ -170,6 +171,7 @@ test('invalid drafts are local, failed searches can retry, pagination preserves 
   await editor.press('Enter');
   assert.equal(calls.length, before);
   f.hold();
+  t.mock.timers.tick(61_000); // Advance the shared server cache as well as browser timers.
   await page.clock.fastForward(61_000);
   await page.waitForFunction(() => document.querySelector('#refresh').disabled);
   assert.equal(await page.locator('.pr-row').count(), 2);
@@ -191,7 +193,8 @@ test('invalid drafts are local, failed searches can retry, pagination preserves 
   assert.equal(await page.locator('#more').isVisible(), false);
   await editor.fill('author:unsubmitted');
   await page.click('#refresh'); await page.waitForFunction(() => !document.querySelector('#refresh').disabled);
-  assert.deepEqual(calls.at(-1), { query: 'is:pr repo:example/sdk', cursor: null });
+  assert.deepEqual(calls.at(-1), { query: 'is:pr repo:example/sdk', cursor: 'page2' });
+  assert.equal(await page.locator('.pr-row').count(), 3);
   assert.equal(await editor.innerText(), 'author:unsubmitted');
   assert.deepEqual(f.errors, []);
 });

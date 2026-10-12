@@ -78,7 +78,7 @@ Credentials stay in the local backend and are never sent to the browser. Both op
 - **Grouping:** Group results by repository, author, status, or checks; collapse groups while preserving GitHub's query order within each group.
 - **PR details:** Authors, reviewers, review decisions, labels, changed-line and file counts, comment counts, source branches, and update times. Authors and reviewers have consistent colors saved in this browser.
 - **Check progress:** Pending badges show passed/total counts, such as **Checks pending · 1/8**. Only successful checks count as passed; skipped and neutral checks do not. Failed-check badges link to GitHub's checks page.
-- **Background refresh:** Refreshes 60 seconds after each load finishes. The circular refresh icon shows the countdown in its center and tooltip, and spins while fetching, with the button disabled until the request finishes. Existing PRs stay visible until fresh data arrives, including when a refresh fails.
+- **Background refresh:** Refreshes the list every 30 seconds and polls PRs with running checks every 15 seconds. Polling pauses while the tab is hidden or offline and while you edit a PR; returning to a stale dashboard refreshes it immediately. Errors trigger automatic backoff, respecting GitHub rate-limit cooldowns. The circular refresh icon shows the countdown in its center and tooltip, and spins while fetching, with the button disabled until the request finishes. Existing PRs stay visible until fresh data arrives, including when a refresh fails.
 - **Viewed tracking:** New updates have brighter, bolder titles. Opening a PR, diff, or checks link marks the displayed update as viewed. Newer updates highlight it again; tracking is per GitHub account and synchronized across dashboard tabs.
 - **Quick links and copying:** Open PRs, repositories, diffs, and user profiles in new tabs. Usernames keep their existing appearance and show a pointer cursor. Copy PR URLs or branch names with confirmation feedback.
 - **Feedback:** Use **report an issue** in the footer to open this repository's GitHub issue form.
@@ -102,11 +102,11 @@ Actions apply to your own PRs and require GitHub write permissions:
 - **Change draft status:** Select **Open** to convert a PR to draft, or **Draft** to mark it ready for review. A tooltip explains the action on hover. The badge changes after GitHub confirms, and merge readiness is rechecked automatically.
 - **Merge:** Eligible PRs show a button with the repository's preferred merge method. The server rechecks permissions and readiness and pins the merge to the displayed commit. Drafts, blocked PRs, merge queues, and stacked PRs do not show this action.
 
-If GitHub is still calculating mergeability, the dashboard rechecks in the background every two seconds, up to five times, without resetting loaded pages. The regular one-minute refresh continues afterward.
+If GitHub is still calculating mergeability, the dashboard rechecks in the background every two seconds, up to five times, without resetting loaded pages. Adaptive background polling continues afterward.
 
 ## Local data and privacy
 
-PRs load in pages of 50, with a 30-second server cache keyed by query and cursor. Manual and automatic refresh bypass the cache and reset pagination on success. Searches run against GitHub; grouping applies to loaded pages. All dashboard searches, including Created by me, expose at most 1,000 matches, with a notice when that limit applies. Narrow the query by repository or date to find more specific results.
+PRs load in pages of 50, with a 25-second server cache keyed by query and cursor. Tabs share cached results and requests already in flight. Manual refresh bypasses completed cached results; background refresh reuses them. Refresh preserves loaded pages. Local edits notify other open tabs to refresh. Searches run against GitHub; grouping applies to loaded pages. All dashboard searches, including Created by me, expose at most 1,000 matches, with a notice when that limit applies. Narrow the query by repository or date to find more specific results.
 
 Labels include the first ten per PR. Reviewers include up to 100 review requests and 100 latest reviews, with a GitHub link when more exist. Check status and counts describe the latest commit's check runs and commit statuses.
 
