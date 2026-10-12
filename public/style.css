@@ -600,7 +600,17 @@ button, .pr-group > summary {
   color: var(--color-warning-text);
 }
 
-.comment-count {
+.pr-files {
+  text-decoration: none;
+  gap: 4px;
+  width: auto;
+  min-width: 24px;
+  padding: 0 4px;
+  white-space: nowrap;
+  font-size: var(--font-size-small);
+}
+
+.file-count, .comment-count {
   font-variant-numeric: tabular-nums;
 }
 

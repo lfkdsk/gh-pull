@@ -18,7 +18,7 @@ export function validateMerge(input) {
 const fields = `id number title url state isDraft createdAt updatedAt headRefName
   author { login } repository { nameWithOwner }
   ${mergeFields}
-  additions deletions totalCommentsCount reviewDecision
+  additions deletions changedFiles totalCommentsCount reviewDecision
   reviewRequests(first: 100) {
     pageInfo { hasNextPage }
     nodes { requestedReviewer {

@@ -9,7 +9,7 @@ async function fixture(t) {
     url: 'https://github.com/example/dashboard/pull/1', repo: 'example/dashboard',
     author: 'alice', status: 'OPEN', branch: 'feature/keyboard',
     createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T01:00:00Z',
-    additions: 520, deletions: 148, commentCount: 12, review: 'NONE',
+    additions: 520, deletions: 148, changedFiles: 8, commentCount: 12, review: 'NONE',
     checks: 'SUCCESS', reviewers: [], labels: [], canMerge: true,
     headOid: 'a'.repeat(40), mergeMethod: 'SQUASH',
   };
@@ -125,13 +125,17 @@ test('clipboard, filters, background refresh, icons and responsive metadata styl
   assert.equal(await page.locator('#refresh').isDisabled(), true);
   assert.equal(await page.locator('.pr-row').count(), 1);
   f.releaseRefresh(); await page.waitForFunction(() => !document.querySelector('#refresh').disabled);
+  assert.equal(await page.locator('.pr-files .file-count').textContent(), '8');
+  assert.match(await page.locator('.pr-files').getAttribute('aria-label'), /8 files changed/);
+  assert.match(await page.locator('.pr-files').getAttribute('href'), /\/files$/);
+  assert.equal(await page.locator('.pr-files').getAttribute('target'), '_blank');
   assert.equal(await page.locator('.diff-counts + .comment-count').textContent(), '12');
   for (const colorScheme of ['light', 'dark']) {
     await page.emulateMedia({ colorScheme });
     const styles = await page.locator('.branch-copy, .updated-time, .comment-count').evaluateAll(nodes => nodes.map(node => {
       const s = getComputedStyle(node); return [s.backgroundColor, s.padding, s.borderRadius];
     }));
-    assert.deepEqual(styles[0], styles[1]); assert.deepEqual(styles[1], styles[2]);
+    for (const style of styles.slice(1)) assert.deepEqual(styles[0], style);
     for (const width of [1280, 375, 320]) {
       await page.setViewportSize({ width, height: 800 });
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);

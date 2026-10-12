@@ -50,6 +50,7 @@ export function normalizePullRequest(pr, viewerLogin) {
     author: pr.author?.login ?? 'deleted-user', repo: pr.repository.nameWithOwner,
     createdAt: pr.createdAt, updatedAt: pr.updatedAt,
     additions: pr.additions, deletions: pr.deletions,
+    changedFiles: pr.changedFiles ?? null,
     commentCount: pr.totalCommentsCount ?? null,
     review: pr.reviewDecision || 'NONE',
     reviewers: reviewersFor(pr),

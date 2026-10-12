@@ -301,6 +301,10 @@ function render() {
         files.title = 'View code changes (opens in a new tab)';
         files.setAttribute('aria-label', `View code changes for ${pr.title} (opens in a new tab)`);
         files.append(icon('files'));
+        if (Number.isInteger(pr.changedFiles) && pr.changedFiles >= 0) {
+          files.append(element('span', String(pr.changedFiles), 'file-count'));
+          files.setAttribute('aria-label', `View code changes for ${pr.title}, ${pr.changedFiles} ${pr.changedFiles === 1 ? 'file' : 'files'} changed (opens in a new tab)`);
+        }
         actions.append(files);
         line.append(actions);
       }
