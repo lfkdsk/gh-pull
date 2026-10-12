@@ -19,6 +19,8 @@ const assets = new Map([
   ['/vendor/codemirror.js', ['vendor/codemirror.js', 'text/javascript']],
   ['/vendor/codemirror.LICENSE.txt', ['vendor/codemirror.LICENSE.txt', 'text/plain']],
   ['/style.css', ['style.css', 'text/css']],
+  ['/theme.css', ['theme.css', 'text/css']],
+  ['/query-editor.css', ['query-editor.css', 'text/css']],
   ['/favicon.svg', ['favicon.svg', 'image/svg+xml']],
 ]);
 
