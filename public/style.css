@@ -681,7 +681,8 @@ input:focus, select:focus, textarea:focus {
 /* Closing issues: compact metadata trigger, readable titles on demand. */
 .issue-count {
   border: 0;
-  color: inherit;
+  background: var(--color-info-bg);
+  color: var(--color-accent);
   font: inherit;
   white-space: nowrap;
 }

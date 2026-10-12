@@ -32,7 +32,7 @@ test('issue counts open full titles and states, hide empty lists, and support ke
   assert.equal(await trigger.textContent(), '2');
   assert.equal(await trigger.getAttribute('title'), 'Closes 2 issues');
   const styles = await page.locator('.pr-row').first().locator('.comment-count, .issue-count').evaluateAll(nodes => nodes.map(node => {
-    const style = getComputedStyle(node); return [style.backgroundColor, style.padding, style.borderRadius];
+    const style = getComputedStyle(node); return [style.padding, style.borderRadius];
   }));
   assert.deepEqual(styles[0], styles[1]);
   await trigger.focus(); await page.keyboard.press('Enter'); await panel.waitFor();
