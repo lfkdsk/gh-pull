@@ -62,7 +62,8 @@ test('query presets, server search, grouping, custom values and shareable URLs',
   assert.equal(await page.locator('#scope').inputValue(), 'custom');
   assert.equal(await page.locator('#state').inputValue(), 'all');
   assert.equal(await page.locator('#sort').inputValue(), 'custom');
-  assert.match(await page.locator('#query-feedback').textContent(), /press Enter/);
+  assert.match(await page.locator('#query-hint').textContent(), /Unapplied changes/);
+  assert.equal(await page.locator('#query-feedback').isVisible(), false);
   await page.click('#query-submit');
   await page.waitForFunction(() => !document.querySelector('#refresh').disabled);
   assert.ok(calls.at(-1).query.includes('label:"good first issue"'));
