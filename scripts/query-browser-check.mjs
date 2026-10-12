@@ -220,6 +220,12 @@ test('late search responses cannot replace newer results', async t => {
 test('editor and suggestions fit mobile and desktop in light and dark themes', async t => {
   const { page, editor, open, errors } = await fixture(t);
   await open();
+  const fontLoaded = await page.evaluate(async () => {
+    await document.fonts.ready;
+    return [...document.fonts].some(font => font.family === 'Inter' && font.status === 'loaded');
+  });
+  assert.equal(fontLoaded, true);
+  assert.match(await page.locator('body').evaluate(node => getComputedStyle(node).fontFamily), /Inter/);
   const dir = process.env.BROWSER_ARTIFACT_DIR || '/tmp/gh-pull-query-browser';
   await mkdir(dir, { recursive: true });
   for (const colorScheme of ['light', 'dark']) {
