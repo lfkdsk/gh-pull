@@ -20,16 +20,24 @@ export function createIssuePopover() {
   let trigger;
   const isOpen = () => panel.matches(':popover-open');
   function position() {
-    if (!isOpen() || !trigger?.isConnected) return;
+    if ((!isOpen() && !panel.classList.contains('measuring')) || !trigger?.isConnected) return;
     const rect = trigger.getBoundingClientRect();
     const width = panel.offsetWidth, height = panel.offsetHeight;
     panel.style.left = `${Math.max(8, Math.min(rect.left, innerWidth - width - 8))}px`;
     const below = rect.bottom + 6;
     panel.style.top = `${Math.max(8, Math.min(below + height <= innerHeight - 8 ? below : rect.top - height - 6, innerHeight - height - 8))}px`;
   }
-  panel.addEventListener('toggle', () => {
-    trigger?.setAttribute('aria-expanded', String(isOpen()));
-    position();
+  panel.addEventListener('beforetoggle', event => {
+    const opening = event.newState === 'open';
+    if (opening) {
+      // Measure invisibly before the native popover becomes visible. The queued
+      // toggle event runs too late and can expose a frame at the old position.
+      panel.classList.add('measuring');
+      position();
+      panel.classList.remove('measuring');
+      panel.scrollTop = 0;
+    }
+    trigger?.setAttribute('aria-expanded', String(opening));
   });
   window.addEventListener('resize', position);
   window.addEventListener('scroll', position, true);

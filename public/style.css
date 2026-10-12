@@ -701,6 +701,7 @@ input:focus, select:focus, textarea:focus {
   box-shadow: 0 8px 24px #0003;
   font-size: var(--font-size-body);
 }
+.issue-popover.measuring { display: block; visibility: hidden; pointer-events: none; }
 .issue-popover h2 { margin: 0 0 8px; font-size: var(--font-size-body); }
 .issue-list { list-style: none; margin: 0; padding: 0; }
 .issue-list li { display: flex; gap: 8px; padding: 8px 0; }

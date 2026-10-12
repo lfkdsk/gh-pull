@@ -89,3 +89,31 @@ test('issue titles render as text and malformed links cannot execute scripts', a
   assert.equal(await page.locator('.issue-title img').count(), 0);
   assert.equal(await page.locator('.issue-link').getAttribute('href'), null);
 });
+
+test('issue popovers open at their final position before the first paint, including different rows and sizes', async t => {
+  const { page } = await fixture(t);
+  for (const width of [1280, 375]) {
+    await page.setViewportSize({ width, height: 800 });
+    for (const index of [0, 1, 0]) {
+      const button = page.locator('.issue-count').nth(index);
+      await button.scrollIntoViewIfNeeded();
+      const positions = await button.evaluate(async trigger => {
+        const panel = document.querySelector('#closing-issues');
+        const box = () => {
+          const rect = panel.getBoundingClientRect();
+          return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+        };
+        trigger.click();
+        const initial = box();
+        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        const settled = box();
+        return { initial, settled, visible: getComputedStyle(panel).visibility, open: panel.matches(':popover-open') };
+      });
+      assert.equal(positions.open, true);
+      assert.equal(positions.visible, 'visible');
+      assert.ok(positions.initial.width > 0);
+      assert.deepEqual(positions.initial, positions.settled, 'The first visible position must already be final');
+      await page.keyboard.press('Escape');
+    }
+  }
+});
