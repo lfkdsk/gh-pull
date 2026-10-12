@@ -116,7 +116,7 @@ test('query HTTP cache isolates searches and cursors, refresh bypasses it, inval
   assert.match(page.headers.get('content-security-policy'), /script-src 'self';/);
   assert.match(page.headers.get('content-security-policy'), /style-src 'self' 'nonce-[^']+';/);
   assert.ok(!html.includes('STYLE_NONCE'));
-  for (const asset of ['query.js', 'query-editor.js', 'vendor/codemirror.js', 'vendor/codemirror.LICENSE.txt']) assert.equal((await fetch(`${origin}/${asset}`)).status, 200);
+  for (const asset of ['theme.css', 'style.css', 'query-editor.css', 'query.js', 'query-editor.js', 'vendor/codemirror.js', 'vendor/codemirror.LICENSE.txt']) assert.equal((await fetch(`${origin}/${asset}`)).status, 200);
 });
 
 test('grouping preserves GitHub query ranking within groups', () => {

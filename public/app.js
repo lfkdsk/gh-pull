@@ -218,7 +218,7 @@ function titleEditor(pr) {
   form.addEventListener('keydown', event => { if (event.key === 'Escape') { event.preventDefault(); close(); } });
   form.append(input, save, cancel);
   if (draft.error) {
-    const error = element('p', draft.error, 'title-error');
+    const error = element('p', draft.error, 'title-error error-message');
     error.setAttribute('role', 'alert'); form.append(error);
   }
   form.addEventListener('submit', async event => {
@@ -242,7 +242,7 @@ function render() {
   updateSummary();
   const fragment = document.createDocumentFragment();
   for (const [name, prs] of groups) {
-    const section = element('details');
+    const section = element('details', undefined, 'pr-group');
     const key = `${$('group').value}:${name}`;
     section.open = !collapsed.has(key);
     section.addEventListener('toggle', () => section.open ? collapsed.delete(key) : collapsed.add(key));
@@ -251,7 +251,7 @@ function render() {
     else if ($('group').value === 'author') heading.append(usernameLink(name), document.createTextNode(` (${prs.length})`));
     else heading.textContent = `${labels[name] ?? name} (${prs.length})`;
     section.append(heading);
-    const list = element('ul');
+    const list = element('ul', undefined, 'pr-list');
     for (const pr of prs) {
       const row = element('li', undefined, 'pr-row');
       row.dataset.prId = pr.id;
@@ -283,7 +283,7 @@ function render() {
         line.append(status);
       } else line.append(badge(labels[pr.status], pr.status));
       if (title.hasAttribute('href')) {
-        const copy = element('button', undefined, 'copy-link');
+        const copy = element('button', undefined, 'copy-link icon-button');
         copy.type = 'button';
         copy.title = 'Copy PR link';
         copy.setAttribute('aria-label', `Copy link to ${pr.title}`);
@@ -291,7 +291,7 @@ function render() {
         clipboardFeedback(copy, { text: title.href, feedback, success: 'PR link copied' });
         const actions = element('span', undefined, 'pr-links');
         actions.append(copy);
-        const files = element('a', undefined, 'pr-files');
+        const files = element('a', undefined, 'pr-files icon-button');
         const url = new URL(title.href);
         url.pathname = `${url.pathname.replace(/\/$/, '')}/files`;
         url.search = ''; url.hash = '';
@@ -306,7 +306,7 @@ function render() {
       }
       line.append(title);
       if (pr.author.toLowerCase() === viewerLogin.toLowerCase()) {
-        const edit = element('button', undefined, 'edit-title');
+        const edit = element('button', undefined, 'edit-title icon-button');
         edit.type = 'button'; edit.title = 'Edit PR title';
         edit.setAttribute('aria-label', `Edit title of ${pr.title}`);
         edit.disabled = Boolean(titleEdits.get(pr.id)?.saving || merges.get(pr.id)?.saving);
@@ -401,11 +401,11 @@ function render() {
       const content = element('div', undefined, 'pr-content');
       content.append(line);
       if (merges.get(pr.id)?.error) {
-        const error = element('p', merges.get(pr.id).error, 'draft-error');
+        const error = element('p', merges.get(pr.id).error, 'draft-error error-message');
         error.setAttribute('role', 'alert'); content.append(error);
       }
       if (draftChanges.get(pr.id)?.error) {
-        const error = element('p', draftChanges.get(pr.id).error, 'draft-error');
+        const error = element('p', draftChanges.get(pr.id).error, 'draft-error error-message');
         error.setAttribute('role', 'alert'); content.append(error);
       }
       if (titleEdits.has(pr.id) && pr.author.toLowerCase() === viewerLogin.toLowerCase()) content.append(titleEditor(pr));
@@ -529,7 +529,8 @@ function updateQueryControls() {
   if ($('query-hint').textContent !== hint) $('query-hint').textContent = hint;
   const feedback = error || '';
   if ($('query-feedback').textContent !== feedback) $('query-feedback').textContent = feedback;
-  $('query-feedback').hidden = !$('query-feedback').textContent;
+  $('query-help').hidden = Boolean(error);
+  $('query-feedback').hidden = !error;
   $('query-feedback').classList.toggle('query-error', Boolean(error));
   $('query-editor').classList.toggle('invalid', Boolean(error));
   $('query-submit').disabled = Boolean(error);

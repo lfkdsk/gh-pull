@@ -153,6 +153,17 @@ test('invalid drafts are local, failed searches can retry, pagination preserves 
   await page.clock.install();
   await f.open();
   const before = calls.length;
+  await editor.fill('repo:');
+  assert.equal(await page.locator('#query-help').isVisible(), false);
+  assert.equal(await page.locator('#query-feedback').isVisible(), true);
+  assert.equal(await page.locator('#query-feedback').textContent(), 'Add a value after repo:');
+  const label = await page.locator('#query-label').boundingBox();
+  const feedback = await page.locator('#query-feedback').boundingBox();
+  assert.equal(feedback.y, label.y);
+  await editor.fill('repo:example/dashboard');
+  assert.equal(await page.locator('#query-feedback').isVisible(), false);
+  assert.equal(await page.locator('#query-help').isVisible(), true);
+  assert.match(await page.locator('#query-help').innerText(), /Unapplied changes · Enter to search/);
   await editor.fill('label:"unfinished');
   assert.equal(await page.locator('#query-submit').isDisabled(), true);
   assert.match(await page.locator('#query-feedback').textContent(), /quotation/);

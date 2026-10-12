@@ -7,7 +7,9 @@
   <meta name="description" content="Your GitHub pull requests, in one fast dashboard.">
   <title>gh-pull · Pull requests</title>
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="stylesheet" href="/theme.css">
   <link rel="stylesheet" href="/style.css">
+  <link rel="stylesheet" href="/query-editor.css">
   <script type="module" src="/app.js"></script>
 </head>
 <body>
@@ -26,14 +28,13 @@
   <main id="dashboard" hidden>
     <form id="filters" aria-label="Pull request filters">
       <div class="query-search">
-        <div class="query-caption"><span id="query-label">Search pull requests</span><span id="query-help"><span id="query-hint" role="status" aria-live="polite">Enter to search</span> · Ctrl+Space for suggestions · <a href="https://docs.github.com/en/search-github/searching-on-github/searching-issues-and-pull-requests" target="_blank" rel="noopener noreferrer">Search syntax</a></span></div>
-        <div id="query-editor"></div><button id="query-submit" type="submit">Search</button>
-        <p id="query-feedback" role="status" aria-live="polite" hidden></p>
+        <div class="query-caption"><span id="query-label" class="field-label">Search pull requests</span><span id="query-help" class="query-guidance help-text"><span id="query-hint" role="status" aria-live="polite">Enter to search</span> · Ctrl+Space for suggestions · <a href="https://docs.github.com/en/search-github/searching-on-github/searching-issues-and-pull-requests" target="_blank" rel="noopener noreferrer">Search syntax</a></span><span id="query-feedback" class="query-guidance help-text" role="status" aria-live="polite" hidden></span></div>
+        <div id="query-editor" class="query-editor"></div><button id="query-submit" type="submit">Search</button>
       </div>
-      <label>Show<select id="scope"><option value="authored">Created by me</option><option value="involved" selected>Involving me</option><option value="review">Review requested</option><option value="all">Anyone</option><option value="custom" disabled>Custom</option></select></label>
-      <label>State<select id="state"><option value="open">Open (including drafts)</option><option value="all">All states</option><option value="merged">Merged</option><option value="closed">Closed (unmerged)</option><option value="custom" disabled>Custom</option></select></label>
-      <label>Group by<select id="group"><option value="repo">Repository</option><option value="author">Author</option><option value="status">Status</option><option value="checks">Checks</option><option value="none">No grouping</option></select></label>
-      <label>Sort<select id="sort"><option value="updated">Recently updated</option><option value="created">Newest created</option><option value="oldest">Oldest created</option><option value="relevance">Best match</option><option value="custom" disabled>Custom</option></select></label>
+      <label class="field field-label">Show<select id="scope"><option value="authored">Created by me</option><option value="involved" selected>Involving me</option><option value="review">Review requested</option><option value="all">Anyone</option><option value="custom" disabled>Custom</option></select></label>
+      <label class="field field-label">State<select id="state"><option value="open">Open (including drafts)</option><option value="all">All states</option><option value="merged">Merged</option><option value="closed">Closed (unmerged)</option><option value="custom" disabled>Custom</option></select></label>
+      <label class="field field-label">Group by<select id="group"><option value="repo">Repository</option><option value="author">Author</option><option value="status">Status</option><option value="checks">Checks</option><option value="none">No grouping</option></select></label>
+      <label class="field field-label">Sort<select id="sort"><option value="updated">Recently updated</option><option value="created">Newest created</option><option value="oldest">Oldest created</option><option value="relevance">Best match</option><option value="custom" disabled>Custom</option></select></label>
     </form>
     <p id="summary" role="status" aria-live="polite">Loading pull requests…</p>
     <div id="error" role="alert" hidden></div>
