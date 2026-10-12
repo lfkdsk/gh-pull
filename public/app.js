@@ -301,6 +301,10 @@ function render() {
         files.title = 'View code changes (opens in a new tab)';
         files.setAttribute('aria-label', `View code changes for ${pr.title} (opens in a new tab)`);
         files.append(icon('files'));
+        if (Number.isInteger(pr.changedFiles) && pr.changedFiles >= 0) {
+          files.append(element('span', String(pr.changedFiles), 'file-count'));
+          files.setAttribute('aria-label', `View code changes for ${pr.title}, ${pr.changedFiles} ${pr.changedFiles === 1 ? 'file' : 'files'} changed (opens in a new tab)`);
+        }
         actions.append(files);
         line.append(actions);
       }
@@ -390,12 +394,6 @@ function render() {
       diffCounts.setAttribute('aria-label', diffCounts.title);
       diffCounts.append(element('span', String(pr.additions), 'additions success'), element('span', String(pr.deletions), 'deletions failure'));
       meta.append(time, diffCounts);
-      if (Number.isInteger(pr.changedFiles) && pr.changedFiles >= 0) {
-        const files = element('span', undefined, 'file-count');
-        files.setAttribute('aria-label', `${pr.changedFiles} ${pr.changedFiles === 1 ? 'file' : 'files'} changed`);
-        files.append(icon('files', 14), document.createTextNode(String(pr.changedFiles)));
-        meta.append(files);
-      }
       if (Number.isInteger(pr.commentCount) && pr.commentCount >= 0) {
         const comments = element('span', undefined, 'comment-count');
         comments.title = `${pr.commentCount} ${pr.commentCount === 1 ? 'comment' : 'comments'}`;

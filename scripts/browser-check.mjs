@@ -125,13 +125,14 @@ test('clipboard, filters, background refresh, icons and responsive metadata styl
   assert.equal(await page.locator('#refresh').isDisabled(), true);
   assert.equal(await page.locator('.pr-row').count(), 1);
   f.releaseRefresh(); await page.waitForFunction(() => !document.querySelector('#refresh').disabled);
-  assert.equal(await page.locator('.diff-counts + .file-count').textContent(), '8');
-  assert.equal(await page.locator('.file-count').getAttribute('aria-label'), '8 files changed');
-  assert.equal(await page.locator('.file-count').getAttribute('title'), null);
-  assert.equal(await page.locator('.file-count + .comment-count').textContent(), '12');
+  assert.equal(await page.locator('.pr-files .file-count').textContent(), '8');
+  assert.match(await page.locator('.pr-files').getAttribute('aria-label'), /8 files changed/);
+  assert.match(await page.locator('.pr-files').getAttribute('href'), /\/files$/);
+  assert.equal(await page.locator('.pr-files').getAttribute('target'), '_blank');
+  assert.equal(await page.locator('.diff-counts + .comment-count').textContent(), '12');
   for (const colorScheme of ['light', 'dark']) {
     await page.emulateMedia({ colorScheme });
-    const styles = await page.locator('.branch-copy, .updated-time, .file-count, .comment-count').evaluateAll(nodes => nodes.map(node => {
+    const styles = await page.locator('.branch-copy, .updated-time, .comment-count').evaluateAll(nodes => nodes.map(node => {
       const s = getComputedStyle(node); return [s.backgroundColor, s.padding, s.borderRadius];
     }));
     for (const style of styles.slice(1)) assert.deepEqual(styles[0], style);
