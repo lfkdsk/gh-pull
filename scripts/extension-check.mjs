@@ -74,9 +74,12 @@ test('GitHub CLI can install and invoke the compiled extension locally', async t
     ...process.env, GH_CONFIG_DIR: join(dir, 'gh-config'), XDG_DATA_HOME: join(dir, 'data'),
     XDG_STATE_HOME: join(dir, 'state'), XDG_CACHE_HOME: join(dir, 'cache'),
     GH_TOKEN: 'fixture-unused-token', GITHUB_TOKEN: '',
+    // Local installation should not wait for release checks or interactive prompts.
+    GH_NO_UPDATE_NOTIFIER: '1', GH_PROMPT_DISABLED: '1',
   };
   await exec('git', ['init', repo], { env });
-  await exec('gh', ['extension', 'install', '.'], { env, cwd: repo, timeout: 15_000 });
+  // Allow headroom for installing the large standalone binary on Windows runners.
+  await exec('gh', ['extension', 'install', '.'], { env, cwd: repo, timeout: 60_000 });
   // gh uses a directory symlink on Unix and a path-pointer file on Windows.
   const installed = await stat(join(dir, 'data', 'gh', 'extensions', 'gh-pull'));
   assert.ok(installed.isDirectory() || installed.isFile(), 'Extension installation must stay inside the test directory');
