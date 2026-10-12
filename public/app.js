@@ -529,7 +529,8 @@ function updateQueryControls() {
   if ($('query-hint').textContent !== hint) $('query-hint').textContent = hint;
   const feedback = error || '';
   if ($('query-feedback').textContent !== feedback) $('query-feedback').textContent = feedback;
-  $('query-feedback').hidden = !$('query-feedback').textContent;
+  $('query-help').hidden = Boolean(error);
+  $('query-feedback').hidden = !error;
   $('query-feedback').classList.toggle('query-error', Boolean(error));
   $('query-editor').classList.toggle('invalid', Boolean(error));
   $('query-submit').disabled = Boolean(error);
