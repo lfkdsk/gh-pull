@@ -39,6 +39,10 @@ gh pull --licenses
 
 The extension listens only on `127.0.0.1`. It prefers port 3000 and chooses a free port if needed. An explicit `--port` fails if occupied. It inherits `GH_TOKEN` / `GITHUB_TOKEN` when supplied; otherwise it uses `gh auth token --hostname github.com`.
 
+The dashboard footer shows the running extension's version, with release versions linked to their GitHub release. You can also check the installed version with `gh pull --version`.
+
+Stable extension builds check GitHub for a newer stable release when the dashboard opens and hourly while visible. An update notice links to the release and shows the upgrade command. Checks use GitHub's public API without credentials, are cached for an hour across tabs, and quietly tolerate connection failures. Development and prerelease builds skip update checks.
+
 Update with `gh pull stop`, `gh extension upgrade pull`, then `gh pull` to start the new version. Also restart after switching GitHub accounts or changing token environment variables. Stop before uninstalling with `gh extension remove pull`.
 
 Release builds target Linux and macOS (Intel/AMD and ARM64), and Windows x64. Private instance-control state is stored under the user's platform data directory (`~/.local/state/gh-pull` on Linux, `~/Library/Application Support/gh-pull` on macOS, or `%LOCALAPPDATA%\gh-pull` on Windows). It contains a local control token, not your GitHub token. `GH_PULL_STATE_DIR` can override this directory for testing or isolated instances.

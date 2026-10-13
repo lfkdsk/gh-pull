@@ -9,6 +9,7 @@ import { createGitHub, ApiError, validateTitleUpdate, validateDraftUpdate, valid
 import { cachedRequest } from './request-cache.js';
 import { authConfig, createAuth } from './auth.js';
 import { createMarketplaceWebhook } from './marketplace.js';
+import { createUpdateCheck } from './extension-updates.js';
 
 const assets = new Map([
   ['/', ['index.html', 'text/html']],
@@ -41,7 +42,12 @@ export function createApp({ list = createGitHub(), updateTitle = list.updateTitl
   const sha = deploymentEnv.RAILWAY_GIT_COMMIT_SHA;
   const owner = deploymentEnv.RAILWAY_GIT_REPO_OWNER;
   const repo = deploymentEnv.RAILWAY_GIT_REPO_NAME;
-  const version = /^[a-f0-9]{40}$/i.test(sha ?? '') ? {
+  const build = config.mode === 'local' ? localControl?.version : null;
+  const checkUpdate = createUpdateCheck(build);
+  const version = build ? {
+    label: build,
+    url: build.startsWith('v') ? `https://github.com/shiqicao/gh-pull/releases/tag/${encodeURIComponent(build)}` : null,
+  } : /^[a-f0-9]{40}$/i.test(sha ?? '') ? {
     sha,
     url: /^[a-z0-9-]+$/i.test(owner ?? '') && /^[a-z0-9_.-]+$/i.test(repo ?? '')
       ? `https://github.com/${owner}/${repo}/commit/${sha}` : null,
@@ -79,6 +85,7 @@ export function createApp({ list = createGitHub(), updateTitle = list.updateTitl
       return;
     }
     try {
+      if (!auth && build && req.method === 'GET' && url.pathname === '/api/updates') return send(200, { update: await checkUpdate() });
       const sessionSend = (status, body) => send(status, url.pathname === '/api/session' && status === 200 && version ? { ...body, version } : body);
       if (auth && await auth.handle(req, res, url, sessionSend)) return;
       if (!auth && req.method === 'GET' && url.pathname === '/api/session') return sessionSend(200, { mode: 'local', authenticated: true });
