@@ -1,8 +1,8 @@
 # <img src="docs/favicon.png" width="32" height="32" align="absmiddle" alt=""> gh-pull
 
-much better github pr dashboard
+**A local pull request dashboard for GitHub CLI**
 
-A fast, local GitHub pull request dashboard. Group PRs by repository, search with GitHub qualifiers, track reviews and checks, and manage your own PRs from one view.
+Organize PRs across repositories, track reviews and checks, and manage your work in the browser using your existing GitHub login.
 
 Choose how to run it:
 
