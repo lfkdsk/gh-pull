@@ -587,6 +587,7 @@ async function load({ append = false, refresh = false, background = false } = {}
   }
   clearTimeout(readinessTimer); readinessController?.abort();
   statusController?.abort(); statusLoading = false;
+  const mergeErrorsToClear = new Map(refresh && !background ? [...merges].filter(([, change]) => !change.saving) : []);
   const request = loads.start();
   const pollRevision = polling.revision;
   if (!append && !refresh) { loadedPages = 1; items = []; total = 0; cursor = null; more = false; limited = false; }
@@ -633,6 +634,10 @@ async function load({ append = false, refresh = false, background = false } = {}
     loadedPages = append ? loadedPages + 1 : pages;
     viewerLogin = data.viewer;
     items = mergePullPages(items, data.items, append);
+    for (const pr of data.items) {
+      const previous = mergeErrorsToClear.get(pr.id);
+      if (previous && merges.get(pr.id) === previous) merges.delete(pr.id);
+    }
     nameColors = assignNameColors(items.flatMap(pr => [pr.author, ...(pr.reviewers ?? []).map(reviewer => reviewer.name)]), nameColors);
     try { localStorage.setItem(nameColorKey, JSON.stringify(nameColors)); } catch { /* Keep assignments stable for this session. */ }
     total = data.total; cursor = data.pageInfo.endCursor; more = data.pageInfo.hasNextPage;
