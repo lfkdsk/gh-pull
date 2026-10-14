@@ -405,20 +405,23 @@ function render() {
         svg.setAttribute('focusable', 'false');
         const path = document.createElementNS(svg.namespaceURI, 'path');
         const first = node.parent.children[0] === node;
-        path.setAttribute('d', `M23 28 H17 Q7 28 7 18 V${first ? 3 : 0}`);
+        path.setAttribute('d', `M23 28 H17 Q7 28 7 18 V${first ? 5 : 0}`);
         if (first) {
           const defs = document.createElementNS(svg.namespaceURI, 'defs');
           const marker = document.createElementNS(svg.namespaceURI, 'marker');
           const id = `dependency-arrow-${++dependencyMarker}`;
           for (const [name, value] of Object.entries({
-            id, viewBox: '0 0 10 10', refX: 10, refY: 5,
-            markerWidth: 7, markerHeight: 7, markerUnits: 'userSpaceOnUse', orient: 'auto',
+            id, viewBox: '0 0 10 10', refX: 8, refY: 5,
+            markerWidth: 9, markerHeight: 9, markerUnits: 'userSpaceOnUse', orient: 'auto', overflow: 'visible',
           })) marker.setAttribute(name, value);
           const head = document.createElementNS(svg.namespaceURI, 'path');
-          head.setAttribute('d', 'M0 0 L10 5 L0 10 Z');
+          head.setAttribute('d', 'M0 1 L10 5 L0 9 L2 5 Z');
           head.setAttribute('fill', 'currentColor');
           head.setAttribute('stroke', 'none');
           marker.append(head); defs.append(marker); svg.append(defs);
+          // Keep the shaft's round cap from protruding through the sharp marker tip.
+          path.setAttribute('stroke-linecap', 'butt');
+          path.setAttribute('class', 'dependency-arrow-path');
           path.setAttribute('marker-end', `url(#${id})`);
         }
         svg.append(path);

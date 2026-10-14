@@ -739,6 +739,7 @@ input:focus, select:focus, textarea:focus {
   stroke-linejoin: round;
   pointer-events: none;
 }
+.dependency-connector .dependency-arrow-path { stroke-linecap: butt; }
 /* Continue the shared trunk only when another sibling follows. */
 .dependency-children > .dependency-node:not(:last-child)::before {
   content: '';
