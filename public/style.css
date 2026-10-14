@@ -716,45 +716,17 @@ input:focus, select:focus, textarea:focus {
 .issue-detail { color: var(--color-muted); font-size: var(--font-size-small); overflow-wrap: anywhere; }
 .issue-more { display: inline-block; margin-top: 8px; color: var(--color-accent); }
 
-/* Branch dependencies: children point upward toward their target PR. */
-.dependency-children {
-  margin-inline-start: 28px;
-  position: relative;
-}
-.dependency-children > .dependency-node {
-  position: relative;
-}
+/* Branch dependencies share one continuous SVG trunk per sibling set. */
+.dependency-node, .dependency-children { position: relative; }
+.dependency-children { margin-inline-start: 28px; }
 .dependency-connector {
   position: absolute;
-  left: -23px;
-  top: 0;
-  width: 24px;
-  height: 34px;
   overflow: visible;
-  fill: none;
   color: var(--color-subtle);
-  stroke: currentColor;
-  stroke-width: 1.5;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  pointer-events: none;
-}
-.dependency-connector .dependency-arrow-path { stroke-linecap: butt; }
-/* Continue the shared trunk only when another sibling follows. */
-.dependency-children > .dependency-node:not(:last-child)::before {
-  content: '';
-  position: absolute;
-  left: -16.75px;
-  top: 18px;
-  bottom: 0;
-  width: 1.5px;
-  background: var(--color-subtle);
   pointer-events: none;
 }
 @media (max-width: 600px) {
   .dependency-children .pr-row { padding-inline: 8px; }
   /* Bound indentation on narrow screens while retaining nested semantics. */
   .dependency-children .dependency-children .dependency-children { margin-inline-start: 0; }
-  .dependency-children .dependency-children .dependency-children > .dependency-node::before,
-  .dependency-children .dependency-children .dependency-children > .dependency-node > .dependency-connector { display: none; }
 }

@@ -142,11 +142,11 @@ To use an existing Chrome installation instead, set `CHROME_BIN` to its executab
 
 ### Frontend organization
 
-Our editor integration lives in `public/query-editor.js`; the shared query model lives in `public/query.js`. Both are ordinary source files and can be edited without rebuilding. Generated third-party code and its license notices live separately in `public/vendor/`.
+Our editor integration lives in `public/query-editor.js`; the shared query model lives in `public/query.js`. Both are ordinary source files and can be edited without rebuilding. Generated third-party code and its license notices live separately in `public/vendor/`. Dependency connectors use SVG.js to draw continuous SVG paths and resize with the rows.
 
 Shared colors and sizing live in `public/theme.css`, dashboard and reusable component styles in `public/style.css`, and query editor styles in `public/query-editor.css`. Use the shared theme variables when adding UI components so light and dark modes stay consistent.
 
-After updating CodeMirror dependencies or the exported APIs in `scripts/vendor/codemirror.js`, run `npm run build:vendor` and commit the generated files. CodeMirror, esbuild, and Playwright are development dependencies; running the server does not require installing them. The editor and vendor bundle load when the dashboard starts.
+After updating CodeMirror or SVG.js dependencies or the exported APIs in `scripts/vendor/`, run `npm run build:vendor` and commit the generated files. CodeMirror, esbuild, and Playwright are development dependencies; running the server does not require installing them. The editor and vendor bundle load when the dashboard starts.
 
 ### Developing the CLI extension
 

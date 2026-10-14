@@ -31,3 +31,35 @@ test('dependency rows match the sketch, remain accessible and fit mobile themes'
   assert.match(await page.locator('[data-pr-id="B"]').innerText(), /Merges into #1/);
   assert.deepEqual(errors, []);
 });
+
+test('shared SVG trunks remain continuous at enlarged zoom and after collapse', async t => {
+  const { page, origin, errors } = await browserFixture(t, { list: async () => ({ viewer: 'alice', total: 4, items: dependencies, pageInfo: { hasNextPage: false } }) });
+  await page.goto(origin); await page.locator('.dependency-trunk').first().waitFor();
+  await page.setViewportSize({ width: 1000, height: 1200 });
+  for (const zoom of [1.25, 1.5, 2]) {
+    await page.evaluate(value => { document.documentElement.style.zoom = value; }, zoom);
+    await page.waitForFunction(() => [...document.querySelectorAll('.dependency-children')].every(list => {
+      const svg = list.parentElement.querySelector(':scope > .dependency-connector');
+      const last = list.lastElementChild;
+      return Number(svg.getAttribute('height')) === last.offsetTop + 30;
+    }));
+    const geometry = await page.locator('.dependency-connector').evaluateAll(nodes => nodes.map(svg => ({
+      trunks: svg.querySelectorAll('.dependency-trunk').length,
+      path: svg.querySelector('.dependency-trunk').getAttribute('d'),
+      left: svg.getBoundingClientRect().left - svg.closest('.pr-group').getBoundingClientRect().left,
+    })));
+    assert.equal(geometry.length, 2);
+    for (const item of geometry) {
+      assert.equal(item.trunks, 1);
+      assert.equal((item.path.match(/V/g) ?? []).length, 1);
+      assert.ok(item.left >= 5);
+    }
+    await page.locator('.pr-group').screenshot({ path: `/tmp/gh-pull-dependencies/zoom-${zoom}.png` });
+  }
+  await page.locator('.pr-group > summary').click();
+  await page.locator('.dependency-trunk').first().waitFor({ state: 'hidden' });
+  await page.locator('.pr-group > summary').click();
+  await page.locator('.dependency-trunk').first().waitFor();
+  assert.equal(await page.locator('.dependency-trunk').count(), 2);
+  assert.deepEqual(errors, []);
+});

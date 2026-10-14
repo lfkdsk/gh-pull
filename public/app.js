@@ -1,3 +1,4 @@
+import { drawDependencies } from './dependencies.js';
 import { createPollingSchedule, pendingPulls } from './polling.js';
 import { createViewedStore, createLatestRequest, mergePullPages, createMergedStore } from './state.js';
 import { createIssuePopover } from './issues.js';
@@ -377,12 +378,13 @@ function titleEditor(pr) {
   return form;
 }
 
+let clearDependencyDrawings = () => {};
 function render() {
+  clearDependencyDrawings();
   issuePopover.close();
   const { count, groups } = groupPulls(items, { group: $('group').value, sort: 'query' });
   updateSummary();
   const fragment = document.createDocumentFragment();
-  let dependencyMarker = 0;
   for (const [name, prs] of groups) {
     const section = element('details', undefined, 'pr-group');
     const key = `${$('group').value}:${name}`;
@@ -397,36 +399,6 @@ function render() {
     const renderDependency = (node, target) => {
       const { pr } = node;
       const entry = element('li', undefined, 'dependency-node');
-      if (node.parent) {
-        const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-        svg.setAttribute('class', 'dependency-connector');
-        svg.setAttribute('viewBox', '0 0 24 34');
-        svg.setAttribute('aria-hidden', 'true');
-        svg.setAttribute('focusable', 'false');
-        const path = document.createElementNS(svg.namespaceURI, 'path');
-        const first = node.parent.children[0] === node;
-        path.setAttribute('d', `M23 28 H17 Q7 28 7 18 V${first ? 5 : 0}`);
-        if (first) {
-          const defs = document.createElementNS(svg.namespaceURI, 'defs');
-          const marker = document.createElementNS(svg.namespaceURI, 'marker');
-          const id = `dependency-arrow-${++dependencyMarker}`;
-          for (const [name, value] of Object.entries({
-            id, viewBox: '0 0 10 10', refX: 8, refY: 5,
-            markerWidth: 9, markerHeight: 9, markerUnits: 'userSpaceOnUse', orient: 'auto', overflow: 'visible',
-          })) marker.setAttribute(name, value);
-          const head = document.createElementNS(svg.namespaceURI, 'path');
-          head.setAttribute('d', 'M0 1 L10 5 L0 9 L2 5 Z');
-          head.setAttribute('fill', 'currentColor');
-          head.setAttribute('stroke', 'none');
-          marker.append(head); defs.append(marker); svg.append(defs);
-          // Keep the shaft's round cap from protruding through the sharp marker tip.
-          path.setAttribute('stroke-linecap', 'butt');
-          path.setAttribute('class', 'dependency-arrow-path');
-          path.setAttribute('marker-end', `url(#${id})`);
-        }
-        svg.append(path);
-        entry.append(svg);
-      }
       const row = element('div', undefined, 'pr-row');
       row.dataset.prId = pr.id;
       const hasUpdates = viewedStore.hasUpdates(pr);
@@ -616,6 +588,7 @@ function render() {
   }
   if (!count && !loading) fragment.append(element('p', 'No pull requests found for this query.', 'empty'));
   $('results').replaceChildren(fragment);
+  clearDependencyDrawings = drawDependencies($('results'));
   $('results').setAttribute('aria-busy', String(loading));
   $('more').hidden = !more; $('more').disabled = loading;
   updateRefreshButton();
