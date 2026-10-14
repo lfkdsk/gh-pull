@@ -382,6 +382,7 @@ function render() {
   const { count, groups } = groupPulls(items, { group: $('group').value, sort: 'query' });
   updateSummary();
   const fragment = document.createDocumentFragment();
+  let dependencyMarker = 0;
   for (const [name, prs] of groups) {
     const section = element('details', undefined, 'pr-group');
     const key = `${$('group').value}:${name}`;
@@ -403,9 +404,23 @@ function render() {
         svg.setAttribute('aria-hidden', 'true');
         svg.setAttribute('focusable', 'false');
         const path = document.createElementNS(svg.namespaceURI, 'path');
-        // One continuous curve avoids seams and the spur from overlapping borders.
         const first = node.parent.children[0] === node;
-        path.setAttribute('d', `${first ? 'M3 6 L7 2 L11 6 M7 2' : 'M7 0'} V18 Q7 28 17 28 H23`);
+        path.setAttribute('d', `M23 28 H17 Q7 28 7 18 V${first ? 3 : 0}`);
+        if (first) {
+          const defs = document.createElementNS(svg.namespaceURI, 'defs');
+          const marker = document.createElementNS(svg.namespaceURI, 'marker');
+          const id = `dependency-arrow-${++dependencyMarker}`;
+          for (const [name, value] of Object.entries({
+            id, viewBox: '0 0 10 10', refX: 10, refY: 5,
+            markerWidth: 7, markerHeight: 7, markerUnits: 'userSpaceOnUse', orient: 'auto',
+          })) marker.setAttribute(name, value);
+          const head = document.createElementNS(svg.namespaceURI, 'path');
+          head.setAttribute('d', 'M0 0 L10 5 L0 10 Z');
+          head.setAttribute('fill', 'currentColor');
+          head.setAttribute('stroke', 'none');
+          marker.append(head); defs.append(marker); svg.append(defs);
+          path.setAttribute('marker-end', `url(#${id})`);
+        }
         svg.append(path);
         entry.append(svg);
       }

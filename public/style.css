@@ -732,7 +732,8 @@ input:focus, select:focus, textarea:focus {
   height: 34px;
   overflow: visible;
   fill: none;
-  stroke: var(--color-subtle);
+  color: var(--color-subtle);
+  stroke: currentColor;
   stroke-width: 1.5;
   stroke-linecap: round;
   stroke-linejoin: round;
