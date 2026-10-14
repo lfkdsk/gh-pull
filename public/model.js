@@ -85,3 +85,40 @@ export function relativeTime(value, now = Date.now()) {
   if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
   return `${Math.floor(seconds / 86400)}d ago`;
 }
+
+// Infer only unambiguous, active branch relationships in the displayed group.
+// Repository identity prevents unrelated fork branches from appearing connected.
+export function dependencyForest(items) {
+  const nodes = new Map(items.map(pr => [pr.id, { pr, parent: null, children: [] }]));
+  const heads = new Map();
+  const active = pr => ['OPEN', 'DRAFT'].includes(pr.status);
+  const key = (repo, branch) => JSON.stringify([repo.toLowerCase(), branch]);
+  for (const node of nodes.values()) {
+    const pr = node.pr;
+    if (!active(pr) || !pr.branchRepository || !pr.branch) continue;
+    const name = key(pr.branchRepository, pr.branch);
+    if (!heads.has(name)) heads.set(name, []);
+    heads.get(name).push(node);
+  }
+  for (const node of nodes.values()) {
+    const pr = node.pr;
+    if (!active(pr) || !pr.baseBranch) continue;
+    const candidates = (heads.get(key(pr.repo, pr.baseBranch)) ?? [])
+      .filter(parent => parent !== node && parent.pr.repo.toLowerCase() === pr.repo.toLowerCase());
+    if (candidates.length === 1) node.parent = candidates[0];
+  }
+  // Malformed/cyclic relationships must never hide rows or recurse forever.
+  for (const node of nodes.values()) {
+    const seen = new Set([node]);
+    for (let parent = node.parent; parent; parent = parent.parent) {
+      if (seen.has(parent)) { node.parent = null; break; }
+      seen.add(parent);
+    }
+  }
+  const roots = [];
+  for (const node of nodes.values()) {
+    if (node.parent) node.parent.children.push(node);
+    else roots.push(node);
+  }
+  return roots;
+}

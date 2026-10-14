@@ -15,7 +15,8 @@ export function validateMerge(input) {
   return { id, headOid: input.headOid, mergeMethod: input.mergeMethod };
 }
 
-const fields = `id number title url state isDraft createdAt updatedAt headRefName
+const fields = `id number title url state isDraft createdAt updatedAt headRefName baseRefName
+  headRepository { nameWithOwner }
   author { login } repository { nameWithOwner }
   ${mergeFields}
   additions deletions changedFiles totalCommentsCount reviewDecision

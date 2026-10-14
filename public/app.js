@@ -2,7 +2,7 @@ import { createPollingSchedule, pendingPulls } from './polling.js';
 import { createViewedStore, createLatestRequest, mergePullPages, createMergedStore } from './state.js';
 import { createIssuePopover } from './issues.js';
 import { element, icon, clipboardFeedback } from './ui.js';
-import { assignNameColors, NAME_COLOR_COUNT, groupPulls, labels, relativeTime } from './model.js';
+import { assignNameColors, NAME_COLOR_COUNT, dependencyForest, groupPulls, labels, relativeTime } from './model.js';
 import { queryFromParams, queryPresets, setQueryPreset, normalizeQuery, queryError, matchesQueryState } from './query.js';
 
 const $ = id => document.getElementById(id);
@@ -393,8 +393,10 @@ function render() {
     else heading.textContent = `${labels[name] ?? name} (${prs.length})`;
     section.append(heading);
     const list = element('ul', undefined, 'pr-list');
-    for (const pr of prs) {
-      const row = element('li', undefined, 'pr-row');
+    const renderDependency = (node, target) => {
+      const { pr } = node;
+      const entry = element('li', undefined, 'dependency-node');
+      const row = element('div', undefined, 'pr-row');
       row.dataset.prId = pr.id;
       const hasUpdates = viewedStore.hasUpdates(pr);
       row.classList.toggle('has-updates', hasUpdates);
@@ -412,6 +414,10 @@ function render() {
       title.dataset.viewPr = '';
       title.setAttribute('aria-label', `${hasUpdates ? 'New updates: ' : ''}${pr.title} (opens in a new tab)`);
       const line = element('div', undefined, 'title-line');
+      if (node.parent) {
+        const relation = element('span', `Merges into #${node.parent.pr.number}: ${node.parent.pr.title}`, 'sr-only');
+        line.append(relation);
+      }
       const feedback = element('span', undefined, 'sr-only');
       feedback.setAttribute('role', 'status');
       if (['OPEN', 'DRAFT'].includes(pr.status) && pr.author.toLowerCase() === viewerLogin.toLowerCase()) {
@@ -565,8 +571,16 @@ function render() {
       }
       row.append(content);
       if (pr.reviewers?.length || pr.reviewersTruncated) row.append(reviewers);
-      list.append(row);
-    }
+      entry.append(row);
+      if (node.children.length) {
+        const children = element('ul', undefined, 'pr-list dependency-children');
+        children.setAttribute('aria-label', `Pull requests merging into #${pr.number}`);
+        for (const child of node.children) renderDependency(child, children);
+        entry.append(children);
+      }
+      target.append(entry);
+    };
+    for (const node of dependencyForest(prs)) renderDependency(node, list);
     section.append(list); fragment.append(section);
   }
   if (!count && !loading) fragment.append(element('p', 'No pull requests found for this query.', 'empty'));

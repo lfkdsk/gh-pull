@@ -715,3 +715,54 @@ input:focus, select:focus, textarea:focus {
 .issue-link:hover .issue-title { color: var(--color-accent); }
 .issue-detail { color: var(--color-muted); font-size: var(--font-size-small); overflow-wrap: anywhere; }
 .issue-more { display: inline-block; margin-top: 8px; color: var(--color-accent); }
+
+/* Branch dependencies: children point upward toward their target PR. */
+.dependency-children {
+  margin-inline-start: 28px;
+  position: relative;
+}
+.dependency-children > .dependency-node {
+  position: relative;
+}
+.dependency-children > .dependency-node::before {
+  content: '';
+  position: absolute;
+  left: -16px;
+  top: 0;
+  bottom: 0;
+  border-left: 1.5px solid var(--color-subtle);
+  pointer-events: none;
+}
+.dependency-children > .dependency-node:last-child::before { height: 29px; }
+.dependency-children > .dependency-node::after {
+  content: '';
+  position: absolute;
+  left: -16px;
+  top: 20px;
+  width: 15px;
+  height: 9px;
+  border-left: 1.5px solid var(--color-subtle);
+  border-bottom: 1.5px solid var(--color-subtle);
+  border-bottom-left-radius: 8px;
+  pointer-events: none;
+}
+.dependency-children::before {
+  content: '';
+  position: absolute;
+  left: -19px;
+  top: 2px;
+  width: 6px;
+  height: 6px;
+  border-top: 1.5px solid var(--color-subtle);
+  border-left: 1.5px solid var(--color-subtle);
+  transform: rotate(45deg);
+}
+@media (max-width: 600px) {
+  .dependency-children { margin-inline-start: 18px; }
+  .dependency-children .pr-row { padding-inline: 8px; }
+  /* Bound indentation on narrow screens while retaining nested semantics. */
+  .dependency-children .dependency-children .dependency-children { margin-inline-start: 0; }
+  .dependency-children .dependency-children .dependency-children::before,
+  .dependency-children .dependency-children .dependency-children > .dependency-node::before,
+  .dependency-children .dependency-children .dependency-children > .dependency-node::after { display: none; }
+}

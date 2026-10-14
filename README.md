@@ -75,6 +75,7 @@ Credentials stay in the local backend and are never sent to the browser. Both op
 ## Features
 
 - **Query search:** Search GitHub with highlighted qualifiers and autocomplete. Show, State, and Sort are synchronized shortcuts for the query; queries and grouping are shareable through the URL.
+- **PR dependencies:** Open and draft PRs targeting another loaded PR’s branch appear beneath it, with indentation and arrows showing the merge target. Relationships use repository and branch identity and appear within the current group; load more results or broaden the query to include missing parents. Ambiguous matches remain separate. Parents appear before children, with query order preserved among roots and siblings.
 - **Grouping:** Group results by repository, author, status, or checks; collapse groups while preserving GitHub's query order within each group.
 - **PR details:** Authors, reviewers, review decisions, labels, changed-line and file counts, comment counts, source branches, and update times. Authors and reviewers have consistent colors saved in this browser.
 - **Check progress:** Pending badges show passed/total counts, such as **Checks pending · 1/8**. Only successful checks count as passed; skipped and neutral checks do not. Failed-check badges link to GitHub's checks page.
