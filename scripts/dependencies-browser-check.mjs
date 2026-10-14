@@ -18,6 +18,12 @@ test('dependency rows match the sketch, remain accessible and fit mobile themes'
     const positions = await page.locator('.pr-row').evaluateAll(rows => rows.map(r => r.getBoundingClientRect().x));
     assert.ok(positions[0] < positions[1] && positions[1] < positions[2]);
     assert.equal(positions[1], positions[3]);
+    const connectorsInside = await page.locator('.dependency-connector').evaluateAll(nodes => nodes.every(node => {
+      const connector = node.getBoundingClientRect();
+      const group = node.closest('.pr-group').getBoundingClientRect();
+      return connector.left >= group.left + 5;
+    }));
+    assert.equal(connectorsInside, true, 'Connectors must have clearance from the group border');
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
     await page.screenshot({ path: `/tmp/gh-pull-dependencies/${colorScheme}-${width}.png` });
   }

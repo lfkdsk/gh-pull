@@ -750,7 +750,6 @@ input:focus, select:focus, textarea:focus {
   pointer-events: none;
 }
 @media (max-width: 600px) {
-  .dependency-children { margin-inline-start: 18px; }
   .dependency-children .pr-row { padding-inline: 8px; }
   /* Bound indentation on narrow screens while retaining nested semantics. */
   .dependency-children .dependency-children .dependency-children { margin-inline-start: 0; }
