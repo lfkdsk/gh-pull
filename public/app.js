@@ -3,7 +3,7 @@ import { createPollingSchedule, pendingPulls } from './polling.js';
 import { createViewedStore, createLatestRequest, mergePullPages, createMergedStore } from './state.js';
 import { createIssuePopover } from './issues.js';
 import { element, icon, clipboardFeedback } from './ui.js';
-import { assignNameColors, NAME_COLOR_COUNT, dependencyForest, groupPulls, labels, relativeTime } from './model.js';
+import { assignNameColors, NAME_COLOR_COUNT, dependencyLanes, groupPulls, labels, relativeTime } from './model.js';
 import { queryFromParams, queryPresets, setQueryPreset, normalizeQuery, queryError, matchesQueryState } from './query.js';
 
 const $ = id => document.getElementById(id);
@@ -385,6 +385,7 @@ function render() {
   const { count, groups } = groupPulls(items, { group: $('group').value, sort: 'query' });
   updateSummary();
   const fragment = document.createDocumentFragment();
+  const laneGroups = [];
   for (const [name, prs] of groups) {
     const section = element('details', undefined, 'pr-group');
     const key = `${$('group').value}:${name}`;
@@ -395,10 +396,21 @@ function render() {
     else if ($('group').value === 'author') heading.append(usernameLink(name), document.createTextNode(` (${prs.length})`));
     else heading.textContent = `${labels[name] ?? name} (${prs.length})`;
     section.append(heading);
+    const graph = dependencyLanes(prs, { allItems: items, sort: queryPresets(appliedQuery).sort });
     const list = element('ul', undefined, 'pr-list');
+    if (graph.gutter) {
+      list.classList.add('has-dependency-lanes');
+      list.style.setProperty('--lane-gutter', `${graph.gutter}px`);
+      laneGroups.push({ list, graph });
+    }
     const renderDependency = (node, target) => {
       const { pr } = node;
       const entry = element('li', undefined, 'dependency-node');
+      if (graph.gutter) {
+        const gutter = element('div', undefined, 'dependency-gutter');
+        gutter.setAttribute('aria-hidden', 'true');
+        entry.append(gutter);
+      }
       const row = element('div', undefined, 'pr-row');
       row.dataset.prId = pr.id;
       const hasUpdates = viewedStore.hasUpdates(pr);
@@ -495,6 +507,12 @@ function render() {
       const repo = element('span', undefined, 'badge');
       repo.append(repositoryLink(pr.repo), document.createTextNode(` #${pr.number}`));
       meta.append(repo, author, checks);
+      const dependency = node.externalParent ?? (node.lane > 3 ? node.parent?.pr : null);
+      if (dependency) {
+        const chip = element('span', `↑ #${dependency.number}${node.externalParent ? ' · not loaded' : ''}`, 'dependency-chip');
+        chip.title = node.externalParent ? 'Parent PR is outside this group’s loaded open results' : 'Parent PR is beyond the four visible lanes';
+        meta.append(chip);
+      }
       if (pr.branch) {
         const branch = element('button', undefined, 'branch-copy');
         branch.type = 'button';
@@ -575,20 +593,14 @@ function render() {
       row.append(content);
       if (pr.reviewers?.length || pr.reviewersTruncated) row.append(reviewers);
       entry.append(row);
-      if (node.children.length) {
-        const children = element('ul', undefined, 'pr-list dependency-children');
-        children.setAttribute('aria-label', `Pull requests merging into #${pr.number}`);
-        for (const child of node.children) renderDependency(child, children);
-        entry.append(children);
-      }
       target.append(entry);
     };
-    for (const node of dependencyForest(prs)) renderDependency(node, list);
+    for (const node of graph.rows) renderDependency(node, list);
     section.append(list); fragment.append(section);
   }
   if (!count && !loading) fragment.append(element('p', 'No pull requests found for this query.', 'empty'));
   $('results').replaceChildren(fragment);
-  clearDependencyDrawings = drawDependencies($('results'));
+  clearDependencyDrawings = drawDependencies(laneGroups);
   $('results').setAttribute('aria-busy', String(loading));
   $('more').hidden = !more; $('more').disabled = loading;
   updateRefreshButton();

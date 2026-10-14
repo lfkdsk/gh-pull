@@ -1,39 +1,59 @@
 import { SVG } from './vendor/svg.js';
 
-// Each sibling set gets one SVG in its parent's list item. The shared vertical
-// trunk is a single path, so row boundaries cannot introduce seams at zoom levels.
-export function drawDependencies(root) {
-  const drawings = [...root.querySelectorAll('.dependency-children')].map(list => ({
-    list,
+// The gutter follows the handoff geometry, but each edge is one SVG path across
+// all intervening rows to avoid seams at fractional zoom and variable row heights.
+export function drawDependencies(groups) {
+  const drawings = groups.map(({ list, graph }) => ({ list, graph,
     canvas: SVG().addTo(list.parentElement).addClass('dependency-connector')
       .attr({ 'aria-hidden': 'true', focusable: 'false' }),
   }));
-  const stroke = { color: 'currentColor', width: 1.5, linecap: 'butt', linejoin: 'round' };
+  const x = lane => 16 + 20 * lane;
+  const stroke = { color: 'var(--lane-line)', width: 2, linecap: 'butt', linejoin: 'round' };
   function draw() {
-    for (const { list, canvas } of drawings) {
+    for (const { list, graph, canvas } of drawings) {
       canvas.clear();
-      if (!list.getClientRects().length || parseFloat(getComputedStyle(list).marginInlineStart) < 24) continue;
-      const rows = [...list.children].map(entry => ({ entry, row: entry.querySelector(':scope > .pr-row') }));
-      const ys = rows.map(({ entry, row }) => entry.offsetTop + Math.min(28, row.offsetHeight / 2));
-      const last = ys.at(-1);
-      if (last === undefined) continue;
-      canvas.node.style.left = `${list.offsetLeft - 24}px`;
+      if (!list.getClientRects().length || !list.offsetHeight) continue;
+      const entries = [...list.children];
+      // Align with the real row's first status pill, even when the title wraps.
+      const centers = entries.map(entry => {
+        const row = entry.getBoundingClientRect();
+        const badge = entry.querySelector('.title-line .badge')?.getBoundingClientRect();
+        const scale = row.height / entry.offsetHeight;
+        return entry.offsetTop + (badge && scale ? (badge.top + badge.height / 2 - row.top) / scale : 22);
+      });
+      canvas.node.style.left = `${list.offsetLeft}px`;
       canvas.node.style.top = `${list.offsetTop}px`;
-      canvas.size(24, last + 2);
-      const head = canvas.marker(8, 8, marker => {
-        marker.path('M0 0 L10 5 L0 10 L2 5 Z').fill('currentColor').stroke('none');
-      }).viewbox(0, 0, 10, 10).ref(8, 5).attr({ markerUnits: 'userSpaceOnUse', orient: 'auto', overflow: 'visible' });
-      // Draw the longest arrow once. Short sibling branches join this same trunk.
-      canvas.path(`M24 ${last} H18 Q8 ${last} 8 ${last - 10} V5`)
-        .fill('none').stroke(stroke).marker('end', head).addClass('dependency-trunk');
-      for (const y of ys.slice(0, -1)) {
-        canvas.path(`M24 ${y} H18 Q8 ${y} 8 ${y - 10}`)
-          .fill('none').stroke(stroke).addClass('dependency-branch');
-      }
+      canvas.size(graph.gutter, list.offsetHeight);
+      const arrow = (cx, top) => canvas.polygon([[cx, top], [cx + 5, top + 7], [cx - 5, top + 7]])
+        .fill('var(--lane-arrow)').addClass('dependency-arrow');
+      graph.rows.forEach((node, i) => {
+        if (node.lane === null || node.lane > 3) return;
+        const cx = x(node.lane), cy = centers[i];
+        if (node.parentIndex >= 0) {
+          const parent = graph.rows[node.parentIndex], py = centers[node.parentIndex];
+          const px = x(parent.lane);
+          const path = node.lane === parent.lane
+            ? `M${cx} ${py + 5} V${cy - 5}`
+            : `M${px} ${py} H${cx - 8} Q${cx} ${py} ${cx} ${py + 8} V${cy - 5}`;
+          canvas.path(path).fill('none').stroke(stroke).addClass('dependency-edge');
+          arrow(cx, py + (node.lane === parent.lane ? 7 : 12));
+        } else if (node.externalParent) {
+          canvas.path(`M${cx} ${cy - 16} V${cy - 5}`).fill('none')
+            .stroke({ ...stroke, dasharray: '3 2' }).addClass('dependency-external');
+          arrow(cx, cy - 22);
+        }
+      });
+      // Paint nodes last so horizontal branch lines terminate behind their rings.
+      graph.rows.forEach((node, i) => {
+        if (node.lane === null || node.lane > 3) return;
+        const color = `var(--lane-${node.nodeStatus})`;
+        canvas.circle(8).center(x(node.lane), centers[i])
+          .fill(node.parentIndex < 0 ? color : 'var(--color-page)')
+          .stroke({ color, width: 2 }).addClass('dependency-dot')
+          .attr({ 'data-pr-id': node.pr.id, 'data-lane': node.lane, 'data-status': node.nodeStatus });
+      });
     }
   }
-  // Layout coordinates (offsetTop/Left) stay in CSS pixels during browser zoom.
-  // Watch row resizing as well as the list, including edits and font loading.
   const observer = new ResizeObserver(draw);
   for (const { list } of drawings) {
     observer.observe(list);

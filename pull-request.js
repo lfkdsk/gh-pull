@@ -54,6 +54,7 @@ export function normalizePullRequest(pr, viewerLogin) {
   return {
     ...mergeOptions(pr, viewerLogin),
     id: pr.id, number: pr.number, title: pr.title, url: pr.url, branch: pr.headRefName ?? '',
+    defaultBranch: pr.repository.defaultBranchRef?.name ?? '',
     baseBranch: pr.baseRefName ?? '', branchRepository: pr.headRepository?.nameWithOwner ?? null,
     status: pr.state === 'OPEN' && pr.isDraft ? 'DRAFT' : pr.state,
     author: pr.author?.login ?? 'deleted-user', repo: pr.repository.nameWithOwner,

@@ -86,28 +86,26 @@ export function relativeTime(value, now = Date.now()) {
   return `${Math.floor(seconds / 86400)}d ago`;
 }
 
-// Infer only unambiguous, active branch relationships in the displayed group.
-// Repository identity prevents unrelated fork branches from appearing connected.
-export function dependencyForest(items) {
-  const nodes = new Map(items.map(pr => [pr.id, { pr, parent: null, children: [] }]));
-  const heads = new Map();
+// Only join branches with unambiguous repository identity; fork names can collide.
+export function dependencyForest(items, { allItems = items, sort = 'query' } = {}) {
   const active = pr => ['OPEN', 'DRAFT'].includes(pr.status);
-  const key = (repo, branch) => JSON.stringify([repo.toLowerCase(), branch]);
+  const matches = (parent, child) => parent.id !== child.id && parent.branch &&
+    parent.branch === child.baseBranch && parent.repo.toLowerCase() === child.repo.toLowerCase() &&
+    parent.branchRepository?.toLowerCase() === child.repo.toLowerCase();
+  const nodes = new Map(items.map(pr => [pr.id, { pr, parent: null, children: [], externalParent: null }]));
   for (const node of nodes.values()) {
     const pr = node.pr;
-    if (!active(pr) || !pr.branchRepository || !pr.branch) continue;
-    const name = key(pr.branchRepository, pr.branch);
-    if (!heads.has(name)) heads.set(name, []);
-    heads.get(name).push(node);
+    if (!active(pr) || !pr.baseBranch || pr.baseBranch === pr.defaultBranch) continue;
+    const candidates = allItems.filter(other => active(other) && matches(other, pr));
+    if (candidates.length === 1) {
+      node.parent = nodes.get(candidates[0].id) ?? null;
+      if (!node.parent) node.externalParent = candidates[0];
+    } else if (!candidates.length) {
+      const closed = allItems.filter(other => other.status === 'CLOSED' && matches(other, pr));
+      const known = closed.length === 1 ? closed[0] : pr.dependencyParent;
+      if (known && ['OPEN', 'DRAFT', 'CLOSED'].includes(known.status) && known.id !== pr.id) node.externalParent = known;
+    }
   }
-  for (const node of nodes.values()) {
-    const pr = node.pr;
-    if (!active(pr) || !pr.baseBranch) continue;
-    const candidates = (heads.get(key(pr.repo, pr.baseBranch)) ?? [])
-      .filter(parent => parent !== node && parent.pr.repo.toLowerCase() === pr.repo.toLowerCase());
-    if (candidates.length === 1) node.parent = candidates[0];
-  }
-  // Malformed/cyclic relationships must never hide rows or recurse forever.
   for (const node of nodes.values()) {
     const seen = new Set([node]);
     for (let parent = node.parent; parent; parent = parent.parent) {
@@ -120,5 +118,51 @@ export function dependencyForest(items) {
     if (node.parent) node.parent.children.push(node);
     else roots.push(node);
   }
+  for (const node of nodes.values()) node.children.sort((a, b) => a.pr.number - b.pr.number);
+  const index = new Map(items.map((pr, i) => [pr.id, i]));
+  const newest = node => [node.pr, ...node.children.map(newest)].reduce((a, b) =>
+    (Date.parse(b.updatedAt) || 0) > (Date.parse(a.updatedAt) || 0) ? b : a);
+  const representatives = new Map(roots.map(node => [node, newest(node)]));
+  roots.sort((a, b) => {
+    const x = representatives.get(a), y = representatives.get(b);
+    if (sort === 'updated') return (Date.parse(y.updatedAt) || 0) - (Date.parse(x.updatedAt) || 0);
+    if (sort === 'created' || sort === 'oldest') return ((Date.parse(y.createdAt) || 0) - (Date.parse(x.createdAt) || 0)) * (sort === 'oldest' ? -1 : 1);
+    return index.get(x.id) - index.get(y.id);
+  });
   return roots;
+}
+
+export function dependencyStatus(pr) {
+  if (['FAILURE', 'ERROR'].includes(pr.checks)) return 'failed';
+  if (['PENDING', 'EXPECTED'].includes(pr.checks)) return 'running';
+  if (pr.status !== 'DRAFT' && (pr.canMerge || pr.review === 'APPROVED')) return 'ready';
+  return 'review';
+}
+
+export function dependencyLanes(items, options) {
+  const rows = [];
+  const visit = (node, parentIndex = -1) => {
+    const index = rows.length;
+    rows.push({ ...node, parentIndex, lane: null, nodeStatus: dependencyStatus(node.pr) });
+    for (const child of node.children) visit(child, index);
+  };
+  dependencyForest(items, options).forEach(node => visit(node));
+  const busy = [], hasFirstChild = new Set();
+  rows.forEach((node, i) => {
+    if (node.parentIndex < 0) {
+      if (node.children.length || node.externalParent) node.lane = 0;
+      return;
+    }
+    const parent = rows[node.parentIndex];
+    if (!hasFirstChild.has(node.parentIndex)) {
+      hasFirstChild.add(node.parentIndex); node.lane = parent.lane;
+    } else {
+      let lane = parent.lane + 1;
+      while (busy.some(b => b.lane === lane && b.s <= i && node.parentIndex <= b.e)) lane++;
+      node.lane = lane;
+    }
+    busy.push({ lane: node.lane, s: node.parentIndex, e: i });
+  });
+  const visible = rows.filter(n => n.lane !== null && n.lane <= 3);
+  return { rows, gutter: visible.length ? 32 + 20 * Math.max(...visible.map(n => n.lane)) : 0 };
 }

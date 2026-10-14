@@ -716,17 +716,24 @@ input:focus, select:focus, textarea:focus {
 .issue-detail { color: var(--color-muted); font-size: var(--font-size-small); overflow-wrap: anywhere; }
 .issue-more { display: inline-block; margin-top: 8px; color: var(--color-accent); }
 
-/* Branch dependencies share one continuous SVG trunk per sibling set. */
-.dependency-node, .dependency-children { position: relative; }
-.dependency-children { margin-inline-start: 28px; }
+/* Fixed graph lanes: row content stays aligned regardless of stack depth. */
+.pr-group, .has-dependency-lanes { position: relative; }
+.has-dependency-lanes > .dependency-node {
+  display: grid;
+  grid-template-columns: var(--lane-gutter) minmax(0, 1fr);
+  border-top: 1px solid var(--color-divider);
+}
+.has-dependency-lanes .pr-row { border-top: 0; padding-inline-start: 0; }
+.dependency-gutter { position: relative; }
 .dependency-connector {
   position: absolute;
   overflow: visible;
-  color: var(--color-subtle);
   pointer-events: none;
 }
-@media (max-width: 600px) {
-  .dependency-children .pr-row { padding-inline: 8px; }
-  /* Bound indentation on narrow screens while retaining nested semantics. */
-  .dependency-children .dependency-children .dependency-children { margin-inline-start: 0; }
+.dependency-chip {
+  background: light-dark(#ddf4ff, rgba(56, 139, 253, .15));
+  color: var(--color-accent);
+  font-size: 12px;
+  padding: 1px 6px;
+  border-radius: 4px;
 }

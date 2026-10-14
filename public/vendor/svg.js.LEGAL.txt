@@ -1,0 +1,13 @@
+Bundled license information:
+
+@svgdotjs/svg.js/dist/svg.esm.js:
+  /*!
+  * @svgdotjs/svg.js - A lightweight library for manipulating and animating SVG.
+  * @version 3.2.8
+  * https://svgjs.dev/
+  *
+  * @copyright Wout Fierens <wout@mick-wout.com>
+  * @license MIT
+  *
+  * BUILT: 2026-08-04T07:47:41.000Z
+  */
