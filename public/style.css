@@ -724,45 +724,36 @@ input:focus, select:focus, textarea:focus {
 .dependency-children > .dependency-node {
   position: relative;
 }
-.dependency-children > .dependency-node::before {
-  content: '';
+.dependency-connector {
   position: absolute;
-  left: -16px;
+  left: -23px;
   top: 0;
+  width: 24px;
+  height: 34px;
+  overflow: visible;
+  fill: none;
+  stroke: var(--color-subtle);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  pointer-events: none;
+}
+/* Continue the shared trunk only when another sibling follows. */
+.dependency-children > .dependency-node:not(:last-child)::before {
+  content: '';
+  position: absolute;
+  left: -16.75px;
+  top: 18px;
   bottom: 0;
-  border-left: 1.5px solid var(--color-subtle);
+  width: 1.5px;
+  background: var(--color-subtle);
   pointer-events: none;
-}
-.dependency-children > .dependency-node:last-child::before { height: 29px; }
-.dependency-children > .dependency-node::after {
-  content: '';
-  position: absolute;
-  left: -16px;
-  top: 20px;
-  width: 15px;
-  height: 9px;
-  border-left: 1.5px solid var(--color-subtle);
-  border-bottom: 1.5px solid var(--color-subtle);
-  border-bottom-left-radius: 8px;
-  pointer-events: none;
-}
-.dependency-children::before {
-  content: '';
-  position: absolute;
-  left: -19px;
-  top: 2px;
-  width: 6px;
-  height: 6px;
-  border-top: 1.5px solid var(--color-subtle);
-  border-left: 1.5px solid var(--color-subtle);
-  transform: rotate(45deg);
 }
 @media (max-width: 600px) {
   .dependency-children { margin-inline-start: 18px; }
   .dependency-children .pr-row { padding-inline: 8px; }
   /* Bound indentation on narrow screens while retaining nested semantics. */
   .dependency-children .dependency-children .dependency-children { margin-inline-start: 0; }
-  .dependency-children .dependency-children .dependency-children::before,
   .dependency-children .dependency-children .dependency-children > .dependency-node::before,
-  .dependency-children .dependency-children .dependency-children > .dependency-node::after { display: none; }
+  .dependency-children .dependency-children .dependency-children > .dependency-node > .dependency-connector { display: none; }
 }

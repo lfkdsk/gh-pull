@@ -396,6 +396,19 @@ function render() {
     const renderDependency = (node, target) => {
       const { pr } = node;
       const entry = element('li', undefined, 'dependency-node');
+      if (node.parent) {
+        const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        svg.setAttribute('class', 'dependency-connector');
+        svg.setAttribute('viewBox', '0 0 24 34');
+        svg.setAttribute('aria-hidden', 'true');
+        svg.setAttribute('focusable', 'false');
+        const path = document.createElementNS(svg.namespaceURI, 'path');
+        // One continuous curve avoids seams and the spur from overlapping borders.
+        const first = node.parent.children[0] === node;
+        path.setAttribute('d', `${first ? 'M3 6 L7 2 L11 6 M7 2' : 'M7 0'} V18 Q7 28 17 28 H23`);
+        svg.append(path);
+        entry.append(svg);
+      }
       const row = element('div', undefined, 'pr-row');
       row.dataset.prId = pr.id;
       const hasUpdates = viewedStore.hasUpdates(pr);
