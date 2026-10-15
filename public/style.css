@@ -268,11 +268,13 @@ button, .pr-group > summary {
 }
 
 .footer-links {
+  min-width: 0;
+  overflow-wrap: anywhere;
   margin-left: auto;
   text-align: right;
 }
 
-.footer-links a, #deployed-version {
+.footer-links > a {
   white-space: nowrap;
 }
 

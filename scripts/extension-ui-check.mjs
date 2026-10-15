@@ -45,7 +45,8 @@ test('packaged dashboard works in a browser without source assets or external re
   for (const colorScheme of ['light', 'dark']) for (const width of [1440, 375]) {
     await page.emulateMedia({ colorScheme });
     await page.setViewportSize({ width, height: 900 });
-    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true,
+      `Packaged dashboard must fit at ${width}px in ${colorScheme} mode`);
     await page.screenshot({ path: join(artifacts, `extension-${colorScheme}-${width}.png`), fullPage: true });
   }
   await page.locator('.cm-content').fill('repo:');
