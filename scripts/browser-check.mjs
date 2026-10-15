@@ -174,3 +174,15 @@ test('clipboard, filters, background refresh, icons and responsive metadata styl
   }
   assert.deepEqual(f.errors, []);
 });
+
+
+test('successful manual refresh clears a stale merge error', async t => {
+  const f = await fixture(t);
+  await f.open();
+  f.reject(true);
+  await f.page.locator('.merge-action').click();
+  await f.page.getByText('Fixture rejected this change', { exact: true }).waitFor();
+  await f.refresh();
+  await f.page.getByText('Fixture rejected this change', { exact: true }).waitFor({ state: 'hidden' });
+  assert.deepEqual(f.errors, []);
+});
