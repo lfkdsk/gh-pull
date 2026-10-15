@@ -1,8 +1,9 @@
+import { drawDependencies } from './dependencies.js';
 import { createPollingSchedule, pendingPulls } from './polling.js';
 import { createViewedStore, createLatestRequest, mergePullPages, createMergedStore } from './state.js';
 import { createIssuePopover } from './issues.js';
 import { element, icon, clipboardFeedback } from './ui.js';
-import { assignNameColors, NAME_COLOR_COUNT, groupPulls, labels, relativeTime } from './model.js';
+import { assignNameColors, NAME_COLOR_COUNT, dependencyLanes, groupPulls, labels, relativeTime } from './model.js';
 import { queryFromParams, queryPresets, setQueryPreset, normalizeQuery, queryError, matchesQueryState } from './query.js';
 
 const $ = id => document.getElementById(id);
@@ -377,11 +378,14 @@ function titleEditor(pr) {
   return form;
 }
 
+let clearDependencyDrawings = () => {};
 function render() {
+  clearDependencyDrawings();
   issuePopover.close();
   const { count, groups } = groupPulls(items, { group: $('group').value, sort: 'query' });
   updateSummary();
   const fragment = document.createDocumentFragment();
+  const laneGroups = [];
   for (const [name, prs] of groups) {
     const section = element('details', undefined, 'pr-group');
     const key = `${$('group').value}:${name}`;
@@ -392,9 +396,22 @@ function render() {
     else if ($('group').value === 'author') heading.append(usernameLink(name), document.createTextNode(` (${prs.length})`));
     else heading.textContent = `${labels[name] ?? name} (${prs.length})`;
     section.append(heading);
+    const graph = dependencyLanes(prs, { allItems: items, sort: queryPresets(appliedQuery).sort });
     const list = element('ul', undefined, 'pr-list');
-    for (const pr of prs) {
-      const row = element('li', undefined, 'pr-row');
+    if (graph.gutter) {
+      list.classList.add('has-dependency-lanes');
+      list.style.setProperty('--lane-gutter', `${graph.gutter}px`);
+      laneGroups.push({ list, graph });
+    }
+    const renderDependency = (node, target) => {
+      const { pr } = node;
+      const entry = element('li', undefined, 'dependency-node');
+      if (graph.gutter) {
+        const gutter = element('div', undefined, 'dependency-gutter');
+        gutter.setAttribute('aria-hidden', 'true');
+        entry.append(gutter);
+      }
+      const row = element('div', undefined, 'pr-row');
       row.dataset.prId = pr.id;
       const hasUpdates = viewedStore.hasUpdates(pr);
       row.classList.toggle('has-updates', hasUpdates);
@@ -412,6 +429,10 @@ function render() {
       title.dataset.viewPr = '';
       title.setAttribute('aria-label', `${hasUpdates ? 'New updates: ' : ''}${pr.title} (opens in a new tab)`);
       const line = element('div', undefined, 'title-line');
+      if (node.parent) {
+        const relation = element('span', `Merges into #${node.parent.pr.number}: ${node.parent.pr.title}`, 'sr-only');
+        line.append(relation);
+      }
       const feedback = element('span', undefined, 'sr-only');
       feedback.setAttribute('role', 'status');
       if (['OPEN', 'DRAFT'].includes(pr.status) && pr.author.toLowerCase() === viewerLogin.toLowerCase()) {
@@ -486,6 +507,12 @@ function render() {
       const repo = element('span', undefined, 'badge');
       repo.append(repositoryLink(pr.repo), document.createTextNode(` #${pr.number}`));
       meta.append(repo, author, checks);
+      const dependency = node.externalParent ?? (node.lane > 3 ? node.parent?.pr : null);
+      if (dependency) {
+        const chip = element('span', `↑ #${dependency.number}${node.externalParent ? ' · not loaded' : ''}`, 'dependency-chip');
+        chip.title = node.externalParent ? 'Parent PR is outside this group’s loaded open results' : 'Parent PR is beyond the four visible lanes';
+        meta.append(chip);
+      }
       if (pr.branch) {
         const branch = element('button', undefined, 'branch-copy');
         branch.type = 'button';
@@ -565,12 +592,15 @@ function render() {
       }
       row.append(content);
       if (pr.reviewers?.length || pr.reviewersTruncated) row.append(reviewers);
-      list.append(row);
-    }
+      entry.append(row);
+      target.append(entry);
+    };
+    for (const node of graph.rows) renderDependency(node, list);
     section.append(list); fragment.append(section);
   }
   if (!count && !loading) fragment.append(element('p', 'No pull requests found for this query.', 'empty'));
   $('results').replaceChildren(fragment);
+  clearDependencyDrawings = drawDependencies(laneGroups);
   $('results').setAttribute('aria-busy', String(loading));
   $('more').hidden = !more; $('more').disabled = loading;
   updateRefreshButton();

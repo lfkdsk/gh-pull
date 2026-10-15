@@ -75,6 +75,7 @@ Credentials stay in the local backend and are never sent to the browser. Both op
 ## Features
 
 - **Query search:** Search GitHub with highlighted qualifiers and autocomplete. Show, State, and Sort are synchronized shortcuts for the query; queries and grouping are shareable through the URL.
+- **PR dependencies:** A fixed graph gutter shows branch-based stacks without indenting rows. First children continue their parent’s lane; side branches occupy up to four lanes. Nodes reflect readiness and check status. Trees sort as a unit using their most recently updated member; children appear depth-first in PR-number order. Known parents outside the loaded group get a dashed stub and “not loaded” chip; edges beyond four lanes use parent chips. Standalone-only groups have no gutter.
 - **Grouping:** Group results by repository, author, status, or checks; collapse groups while preserving GitHub's query order within each group.
 - **PR details:** Authors, reviewers, review decisions, labels, changed-line and file counts, comment counts, source branches, and update times. Authors and reviewers have consistent colors saved in this browser.
 - **Check progress:** Pending badges show passed/total counts, such as **Checks pending · 1/8**. Only successful checks count as passed; skipped and neutral checks do not. Failed-check badges link to GitHub's checks page.
@@ -139,13 +140,15 @@ npm run test:browser
 
 To use an existing Chrome installation instead, set `CHROME_BIN` to its executable path when running `npm run test:browser`. Browser screenshots are written to `/tmp/gh-pull-query-browser` (override with `BROWSER_ARTIFACT_DIR`).
 
+Regenerate the README and Marketplace screenshots with `node scripts/capture-dashboard.mjs` (or set `CHROME_BIN` as above). The capture uses fictional PRs and mocked update information.
+
 ### Frontend organization
 
-Our editor integration lives in `public/query-editor.js`; the shared query model lives in `public/query.js`. Both are ordinary source files and can be edited without rebuilding. Generated third-party code and its license notices live separately in `public/vendor/`.
+Our editor integration lives in `public/query-editor.js`; the shared query model lives in `public/query.js`. Both are ordinary source files and can be edited without rebuilding. Generated third-party code and its license notices live separately in `public/vendor/`. Dependency lanes use SVG.js to draw continuous SVG paths and resize with the rows. Parent lookups are batched and cached for one minute; failures leave the loaded results available.
 
 Shared colors and sizing live in `public/theme.css`, dashboard and reusable component styles in `public/style.css`, and query editor styles in `public/query-editor.css`. Use the shared theme variables when adding UI components so light and dark modes stay consistent.
 
-After updating CodeMirror dependencies or the exported APIs in `scripts/vendor/codemirror.js`, run `npm run build:vendor` and commit the generated files. CodeMirror, esbuild, and Playwright are development dependencies; running the server does not require installing them. The editor and vendor bundle load when the dashboard starts.
+After updating CodeMirror or SVG.js dependencies or the exported APIs in `scripts/vendor/`, run `npm run build:vendor` and commit the generated files. CodeMirror, esbuild, and Playwright are development dependencies; running the server does not require installing them. The editor and vendor bundle load when the dashboard starts.
 
 ### Developing the CLI extension
 

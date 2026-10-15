@@ -46,3 +46,11 @@ The standalone CLI extension bundles Node.js and proper-lockfile with its
 dependencies (graceful-fs, retry, and signal-exit). Full license texts, including
 the runtime's third-party notices, are embedded at build time and available with
 `gh pull --licenses`. esbuild and postject are build tools only.
+
+---
+
+SVG.js dependency connectors
+https://github.com/svgdotjs/svg.js
+
+MIT license and copyright notices are included in public/vendor/svg.LICENSE.txt,
+alongside the generated browser bundle.

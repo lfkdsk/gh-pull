@@ -15,8 +15,9 @@ export function validateMerge(input) {
   return { id, headOid: input.headOid, mergeMethod: input.mergeMethod };
 }
 
-const fields = `id number title url state isDraft createdAt updatedAt headRefName
-  author { login } repository { nameWithOwner }
+const fields = `id number title url state isDraft createdAt updatedAt headRefName baseRefName
+  headRepository { nameWithOwner }
+  author { login } repository { nameWithOwner defaultBranchRef { name } }
   ${mergeFields}
   additions deletions changedFiles totalCommentsCount reviewDecision
   closingIssuesReferences(first: 20) {
@@ -84,6 +85,44 @@ export function createGitHub(options = {}) {
     const access = await getMergeAccess(repos);
     return items.map(pr => access.has(pr.repo) ? { ...pr, mergeAccess: access.get(pr.repo) } : pr);
   }
+  const dependencyCache = new Map();
+  async function withDependencyParents(items) {
+    const candidates = new Map();
+    for (const pr of items) {
+      if (!['OPEN', 'DRAFT'].includes(pr.status) || !pr.defaultBranch || !pr.baseBranch || pr.baseBranch === pr.defaultBranch) continue;
+      const key = JSON.stringify([pr.repo, pr.baseBranch]);
+      candidates.set(key, pr);
+    }
+    const missing = [...candidates].filter(([key]) => (dependencyCache.get(key)?.until ?? 0) < Date.now());
+    for (let offset = 0; offset < missing.length; offset += 20) {
+      const batch = missing.slice(offset, offset + 20), variables = {}, definitions = [], queries = [];
+      batch.forEach(([, pr], i) => {
+        const [owner, repo] = pr.repo.split('/');
+        Object.assign(variables, { [`owner${i}`]: owner, [`repo${i}`]: repo, [`branch${i}`]: pr.baseBranch });
+        definitions.push(`$owner${i}: String!`, `$repo${i}: String!`, `$branch${i}: String!`);
+        queries.push(`p${i}: repository(owner: $owner${i}, name: $repo${i}) {
+          pullRequests(headRefName: $branch${i}, states: [OPEN, CLOSED], first: 10, orderBy: {field: UPDATED_AT, direction: DESC}) {
+            pageInfo { hasNextPage } nodes { id number state headRefName headRepository { nameWithOwner } }
+          }
+        }`);
+      });
+      try {
+        const data = await graphql(`query DependencyParents(${definitions.join(', ')}) { ${queries.join('\n')} }`, variables);
+        batch.forEach(([key, pr], i) => {
+          const connection = data[`p${i}`]?.pullRequests;
+          const matches = (connection?.nodes ?? []).filter(n => n.headRefName === pr.baseBranch && n.headRepository?.nameWithOwner?.toLowerCase() === pr.repo.toLowerCase());
+          const open = matches.filter(n => n.state === 'OPEN');
+          const match = !connection?.pageInfo?.hasNextPage && (open.length === 1 ? open[0] : !open.length && matches.length === 1 ? matches[0] : null);
+          if (dependencyCache.size >= 256) dependencyCache.clear();
+          dependencyCache.set(key, { until: Date.now() + 60_000, parent: match ? { id: match.id, number: match.number, status: match.state } : null });
+        });
+      } catch {
+        // The graph is supplementary: a lookup failure must not hide loaded PRs.
+        for (const [key] of batch) dependencyCache.set(key, { until: Date.now() + 60_000, parent: null });
+      }
+    }
+    return items.map(pr => ({ ...pr, dependencyParent: dependencyCache.get(JSON.stringify([pr.repo, pr.baseBranch]))?.parent ?? null }));
+  }
   async function list({ scope = 'authored', state = 'open', cursor = null, query: customQuery } = {}) {
     const states = { open: ['OPEN'], closed: ['CLOSED'], merged: ['MERGED'], all: ['OPEN', 'CLOSED', 'MERGED'] }[state];
     if (!states || !['authored', 'involved', 'review'].includes(scope)) throw new ApiError('Invalid filter.', 400);
@@ -112,7 +151,7 @@ export function createGitHub(options = {}) {
       total: connection.totalCount ?? connection.issueCount,
       limited: connection.issueCount > 1000,
       pageInfo: connection.pageInfo,
-      items: await withMergeAccess(connection.nodes.filter(pr => pr?.id).map(pr => normalizePullRequest(pr, data.viewer.login))),
+      items: await withDependencyParents(await withMergeAccess(connection.nodes.filter(pr => pr?.id).map(pr => normalizePullRequest(pr, data.viewer.login)))),
     };
   }
 
@@ -122,7 +161,7 @@ export function createGitHub(options = {}) {
       viewer { login }
       nodes(ids: $ids) { ... on PullRequest { ${fields} } }
     }`, { ids });
-    return { items: await withMergeAccess(data.nodes.filter(pr => pr?.id).map(pr => normalizePullRequest(pr, data.viewer.login))) };
+    return { items: await withDependencyParents(await withMergeAccess(data.nodes.filter(pr => pr?.id).map(pr => normalizePullRequest(pr, data.viewer.login)))) };
   };
 
   list.mergeReadiness = async ids => {
