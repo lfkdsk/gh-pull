@@ -744,6 +744,29 @@ window.addEventListener('focus', poll);
 window.addEventListener('pagehide', () => { events?.close(); events = null; });
 window.addEventListener('pageshow', syncActivity);
 
+$('update-copy-symbol').append(icon('copy', 14));
+clipboardFeedback($('copy-update-command'), {
+  text: $('update-command').textContent,
+  symbol: $('update-copy-symbol'),
+  feedback: $('update-copy-feedback'),
+  success: 'Update command copied',
+});
+
+let updateTimer;
+async function checkExtensionUpdate() {
+  if (document.hidden) return;
+  try {
+    const response = await fetch('/api/updates');
+    if (!response.ok) return;
+    const { update } = await response.json();
+    $('update-notice').hidden = !update;
+    if (update) {
+      $('update-release').textContent = `gh-pull ${update.version}`;
+      $('update-release').href = update.url;
+    }
+  } catch { /* Update checks must not interrupt the dashboard. */ }
+}
+
 async function initializeSession() {
   $('session-retry').hidden = true;
   $('session-status').hidden = false;
@@ -752,12 +775,17 @@ async function initializeSession() {
     const response = await fetch('/api/session');
     if (!response.ok) throw new Error('Could not connect. Please retry.');
     const session = await response.json();
+    clearInterval(updateTimer);
+    if (session.mode === 'local' && session.version?.label) {
+      void checkExtensionUpdate();
+      updateTimer = setInterval(checkExtensionUpdate, 60 * 60 * 1000);
+    }
     const version = $('deployed-version');
     version.replaceChildren();
     version.hidden = !session.version;
     if (session.version) {
-      const commit = element(session.version.url ? 'a' : 'span', session.version.sha.slice(0, 7));
-      commit.title = `Deployed commit: ${session.version.sha}`;
+      const commit = element(session.version.url ? 'a' : 'span', session.version.label ?? session.version.sha.slice(0, 7));
+      commit.title = session.version.label ? `Installed version: ${session.version.label}` : `Deployed commit: ${session.version.sha}`;
       if (session.version.url) {
         commit.href = session.version.url;
         commit.target = '_blank'; commit.rel = 'noopener noreferrer';

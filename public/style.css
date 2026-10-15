@@ -268,11 +268,13 @@ button, .pr-group > summary {
 }
 
 .footer-links {
+  min-width: 0;
+  overflow-wrap: anywhere;
   margin-left: auto;
   text-align: right;
 }
 
-.footer-links a, #deployed-version {
+.footer-links > a {
   white-space: nowrap;
 }
 
@@ -286,6 +288,31 @@ button, .pr-group > summary {
 }
 
 /* Pull request groups and rows */
+#update-notice {
+  padding: 12px 16px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-panel);
+  background: var(--color-info-bg);
+  overflow-wrap: anywhere;
+}
+
+#update-release { color: var(--color-accent); }
+
+#copy-update-command {
+  max-width: 100%;
+  padding: 3px 6px;
+  text-align: left;
+  font-size: inherit;
+  overflow-wrap: anywhere;
+}
+
+#update-copy-symbol {
+  display: inline-block;
+  width: 14px;
+  margin-inline-start: 6px;
+  vertical-align: middle;
+}
+
 .pr-group {
   margin: 16px 0;
   border: 1px solid var(--color-border);
