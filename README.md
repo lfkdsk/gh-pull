@@ -13,7 +13,7 @@ Both use your existing GitHub CLI login or a personal access token. No separate 
 
 [![gh-pull dashboard showing fictional pull requests — click to enlarge](docs/demo.png)](docs/demo.png?raw=true)
 
-[▶ Watch the demo](https://www.youtube.com/watch?v=-Bynup-6nRs) · 33 seconds · 4K
+[▶ Watch the quick tour](https://youtu.be/4LBga5H5Wwk) · 81 seconds · narrated with captions
 
 ## GitHub CLI extension
 
