@@ -337,9 +337,11 @@ async function mergePull(pr, mergeMethod) {
   await changePull(pr, merges, {
     action: 'merge', input: { headOid: pr.headOid, mergeMethod },
     message: `Merged ${pr.repo} #${pr.number}`,
+    onSuccess: () => { void load({ refresh: true, background: true }); },
     apply(current, data) {
       if (!current) return;
       Object.assign(current, data);
+      items = items.map(item => mergedStore.reconcile(item));
       if (!matchesQueryState(current, appliedQuery)) {
         items = items.filter(item => item.id !== pr.id);
         total = Math.max(0, total - 1);
@@ -537,10 +539,13 @@ function render() {
       const repo = element('span', undefined, 'badge');
       repo.append(repositoryLink(pr.repo), document.createTextNode(` #${pr.number}`));
       meta.append(repo, author, checks);
-      const dependency = node.externalParent ?? (node.lane > 3 ? node.parent?.pr : null);
+      const dependency = node.mergedParent ?? node.externalParent ?? (node.lane > 3 ? node.parent?.pr : null);
       if (dependency) {
-        const chip = element('span', `↑ #${dependency.number}${node.externalParent ? ' · not loaded' : ''}`, 'dependency-chip');
-        chip.title = node.externalParent ? 'Parent PR is outside this group’s loaded open results' : 'Parent PR is beyond the four visible lanes';
+        const state = dependency.status === 'MERGED' ? 'merged' : dependency.status === 'CLOSED' ? 'closed' : node.externalParent ? 'not loaded' : '';
+        const chip = element('span', `↑ #${dependency.number}${state ? ` · ${state}` : ''}`, 'dependency-chip');
+        chip.title = state === 'merged' ? 'Parent PR has already merged; it is no longer an active dependency'
+          : state === 'closed' ? 'Parent PR was closed without merging'
+          : node.externalParent ? 'Parent PR is outside this group’s loaded open results' : 'Parent PR is beyond the four visible lanes';
         meta.append(chip);
       }
       if (pr.branch) {

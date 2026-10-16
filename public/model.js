@@ -92,7 +92,7 @@ export function dependencyForest(items, { allItems = items, sort = 'query' } = {
   const matches = (parent, child) => parent.id !== child.id && parent.branch &&
     parent.branch === child.baseBranch && parent.repo.toLowerCase() === child.repo.toLowerCase() &&
     parent.branchRepository?.toLowerCase() === child.repo.toLowerCase();
-  const nodes = new Map(items.map(pr => [pr.id, { pr, parent: null, children: [], externalParent: null }]));
+  const nodes = new Map(items.map(pr => [pr.id, { pr, parent: null, children: [], externalParent: null, mergedParent: null }]));
   for (const node of nodes.values()) {
     const pr = node.pr;
     if (!active(pr) || !pr.baseBranch || pr.baseBranch === pr.defaultBranch) continue;
@@ -101,9 +101,12 @@ export function dependencyForest(items, { allItems = items, sort = 'query' } = {
       node.parent = nodes.get(candidates[0].id) ?? null;
       if (!node.parent) node.externalParent = candidates[0];
     } else if (!candidates.length) {
-      const closed = allItems.filter(other => other.status === 'CLOSED' && matches(other, pr));
-      const known = closed.length === 1 ? closed[0] : pr.dependencyParent;
-      if (known && ['OPEN', 'DRAFT', 'CLOSED'].includes(known.status) && known.id !== pr.id) node.externalParent = known;
+      const inactive = allItems.filter(other => ['CLOSED', 'MERGED'].includes(other.status) && matches(other, pr));
+      const known = inactive.length === 1 ? inactive[0] : pr.dependencyParent;
+      if (known && known.id !== pr.id) {
+        if (known.status === 'MERGED') node.mergedParent = known;
+        else if (['OPEN', 'DRAFT', 'CLOSED'].includes(known.status)) node.externalParent = known;
+      }
     }
   }
   for (const node of nodes.values()) {

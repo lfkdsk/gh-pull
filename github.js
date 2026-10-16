@@ -101,7 +101,7 @@ export function createGitHub(options = {}) {
         Object.assign(variables, { [`owner${i}`]: owner, [`repo${i}`]: repo, [`branch${i}`]: pr.baseBranch });
         definitions.push(`$owner${i}: String!`, `$repo${i}: String!`, `$branch${i}: String!`);
         queries.push(`p${i}: repository(owner: $owner${i}, name: $repo${i}) {
-          pullRequests(headRefName: $branch${i}, states: [OPEN, CLOSED], first: 10, orderBy: {field: UPDATED_AT, direction: DESC}) {
+          pullRequests(headRefName: $branch${i}, states: [OPEN, CLOSED, MERGED], first: 10, orderBy: {field: UPDATED_AT, direction: DESC}) {
             pageInfo { hasNextPage } nodes { id number state headRefName headRepository { nameWithOwner } }
           }
         }`);
@@ -191,6 +191,7 @@ export function createGitHub(options = {}) {
     }`, { input: { pullRequestId: id, expectedHeadOid: headOid, mergeMethod } });
     const merged = data.mergePullRequest?.pullRequest;
     if (merged?.state !== 'MERGED') throw new ApiError('GitHub did not confirm the merge. Refresh to check its status.');
+    dependencyCache.clear();
     return { id: merged.id, status: 'MERGED', updatedAt: merged.updatedAt, canMerge: false };
   };
 

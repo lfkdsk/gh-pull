@@ -71,6 +71,8 @@ export function createMergedStore() {
   return {
     clear() { merged.clear(); },
     reconcile(pr) {
+      const parent = merged.get(pr.dependencyParent?.id);
+      if (parent) pr = { ...pr, dependencyParent: { ...pr.dependencyParent, ...parent } };
       const known = merged.get(pr.id);
       if (pr.status === 'MERGED' && (!known || Date.parse(pr.updatedAt) >= Date.parse(known.updatedAt))) {
         merged.set(pr.id, { status: 'MERGED', updatedAt: pr.updatedAt, canMerge: false, mergePending: false });
