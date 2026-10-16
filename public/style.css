@@ -764,3 +764,20 @@ input:focus, select:focus, textarea:focus {
   padding: 1px 6px;
   border-radius: 4px;
 }
+
+/* Keep the method choice beside its merge action, including narrow rows. */
+.merge-controls {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  max-width: 100%;
+}
+
+.merge-method {
+  height: auto;
+  max-width: 100%;
+  padding: 2px 4px;
+  font-size: var(--font-size-small);
+  border-radius: var(--radius-small);
+}

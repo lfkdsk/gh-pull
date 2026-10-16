@@ -68,8 +68,8 @@ test('nonblocking review decisions do not override GitHub’s clean merge status
   }
 });
 
-test('merge rejects changed commits, stale readiness, changed method and malformed input without mutation', async () => {
-  for (const overrides of [{ headRefOid: 'b'.repeat(40) }, { mergeStateStatus: 'BLOCKED' }, { repository: { ...ready.repository, viewerDefaultMergeMethod: 'MERGE' } }]) {
+test('merge rejects changed commits, stale readiness, disabled method and malformed input without mutation', async () => {
+  for (const overrides of [{ headRefOid: 'b'.repeat(40) }, { mergeStateStatus: 'BLOCKED' }, { repository: { ...ready.repository, squashMergeAllowed: false } }]) {
     const { github, calls } = client({ ...ready, ...overrides });
     await assert.rejects(github.merge(input), { status: 409 });
     assert.equal(calls.length, 1);
@@ -202,4 +202,19 @@ test('review badges distinguish bypass permission without relaxing merge safety'
   for (const mergeStateStatus of ['DIRTY', 'BLOCKED', 'UNKNOWN']) {
     assert.equal(mergeOptions({ ...ready, viewerCanMergeAsAdmin: true, mergeStateStatus }, 'alice').canMerge, false);
   }
+});
+
+test('merge methods come from repository settings and any enabled choice can be used', async () => {
+  const pr = { ...ready, repository: { ...ready.repository, rebaseMergeAllowed: true } };
+  assert.deepEqual(mergeOptions(pr, 'alice').mergeMethods, ['MERGE', 'SQUASH', 'REBASE']);
+  for (const mergeMethod of ['MERGE', 'SQUASH', 'REBASE']) {
+    const { github, calls } = client(pr);
+    assert.equal((await github.merge({ ...input, mergeMethod })).status, 'MERGED');
+    assert.equal(calls[1].variables.input.mergeMethod, mergeMethod);
+  }
+  const changedDefault = client({ ...pr, repository: { ...pr.repository, viewerDefaultMergeMethod: 'REBASE' } });
+  assert.equal((await changedDefault.github.merge(input)).status, 'MERGED');
+  const disabled = client();
+  await assert.rejects(disabled.github.merge({ ...input, mergeMethod: 'REBASE' }), { status: 409 });
+  assert.equal(disabled.calls.length, 1);
 });

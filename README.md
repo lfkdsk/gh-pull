@@ -106,7 +106,7 @@ Actions apply to your own PRs and require GitHub write permissions:
 
 - **Edit a title:** Select the pencil icon. Save or Enter submits; Cancel or Escape discards. Titles must be 1–256 characters on one line. Failed saves retain the draft, and the server checks whether the title changed on GitHub before updating it.
 - **Change draft status:** Select **Open** to convert a PR to draft, or **Draft** to mark it ready for review. A tooltip explains the action on hover. The badge changes after GitHub confirms, and merge readiness is rechecked automatically.
-- **Merge:** Eligible PRs show a button with the repository's preferred merge method. The server rechecks permissions and readiness and pins the merge to the displayed commit. Drafts, blocked PRs, merge queues, and stacked PRs do not show this action.
+- **Merge:** Eligible PRs default to your preferred GitHub merge method. When the repository allows multiple methods, a dropdown offers merge commit, squash, or rebase using GitHub's current settings. A valid selection survives refreshes; disabled methods are removed. The server rechecks the chosen method, permissions, and readiness and pins the merge to the displayed commit. Drafts, blocked PRs, merge queues, and stacked PRs do not show this action.
 
 If GitHub is still calculating mergeability, the dashboard rechecks in the background every two seconds, up to five times, without resetting loaded pages. Adaptive background polling continues afterward.
 
