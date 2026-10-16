@@ -537,10 +537,13 @@ function render() {
       const repo = element('span', undefined, 'badge');
       repo.append(repositoryLink(pr.repo), document.createTextNode(` #${pr.number}`));
       meta.append(repo, author, checks);
-      const dependency = node.externalParent ?? (node.lane > 3 ? node.parent?.pr : null);
+      const dependency = node.mergedParent ?? node.externalParent ?? (node.lane > 3 ? node.parent?.pr : null);
       if (dependency) {
-        const chip = element('span', `↑ #${dependency.number}${node.externalParent ? ' · not loaded' : ''}`, 'dependency-chip');
-        chip.title = node.externalParent ? 'Parent PR is outside this group’s loaded open results' : 'Parent PR is beyond the four visible lanes';
+        const state = dependency.status === 'MERGED' ? 'merged' : dependency.status === 'CLOSED' ? 'closed' : node.externalParent ? 'not loaded' : '';
+        const chip = element('span', `↑ #${dependency.number}${state ? ` · ${state}` : ''}`, 'dependency-chip');
+        chip.title = state === 'merged' ? 'Parent PR has already merged; it is no longer an active dependency'
+          : state === 'closed' ? 'Parent PR was closed without merging'
+          : node.externalParent ? 'Parent PR is outside this group’s loaded open results' : 'Parent PR is beyond the four visible lanes';
         meta.append(chip);
       }
       if (pr.branch) {

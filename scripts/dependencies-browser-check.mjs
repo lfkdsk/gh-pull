@@ -65,3 +65,28 @@ test('wide trees fall back to parent chips and a retargeted standalone group dro
   assert.equal(await page.locator('.pr-row').count(), items.length);
   assert.deepEqual(errors, []);
 });
+
+test('parent labels track merged and closed states after refresh without a merged connector', async t => {
+  let parentState = 'OPEN';
+  const child = { ...scenario3a[1], dependencyParent: { id: 'parent', number: 42, status: 'OPEN' } };
+  const { page, origin, errors } = await browserFixture(t, {
+    list: async () => ({ viewer: 'viewer', total: 1, items: [{ ...child, dependencyParent: { ...child.dependencyParent, status: parentState } }], pageInfo: { hasNextPage: false } }),
+  });
+  await page.goto(origin);
+  const chip = page.locator('.dependency-chip');
+  await chip.waitFor();
+  assert.equal(await chip.innerText(), '↑ #42 · not loaded');
+  assert.equal(await page.locator('.dependency-external').count(), 1);
+  for (const state of ['MERGED', 'CLOSED', 'OPEN']) {
+    parentState = state;
+    await page.locator('#refresh').click();
+    await page.waitForFunction(() => !document.querySelector('#refresh').disabled);
+    assert.equal(await chip.innerText(), `↑ #42 · ${state === 'MERGED' ? 'merged' : state === 'CLOSED' ? 'closed' : 'not loaded'}`);
+    assert.equal(await page.locator('.dependency-external').count(), state === 'MERGED' ? 0 : 1);
+    if (state === 'MERGED') {
+      assert.equal(await page.locator('.dependency-connector').count(), 0);
+      await page.screenshot({ path: '/tmp/gh-pull-merged-parent.png', fullPage: true });
+    }
+  }
+  assert.deepEqual(errors, []);
+});

@@ -72,26 +72,47 @@ test('hidden parent lookup is cached, ignores forks/default branches and tolerat
   const raw = { id: 'child', number: 516, state: 'OPEN', isDraft: false, headRefName: 'child', baseRefName: 'parent',
     repository: { nameWithOwner: 'org/repo', defaultBranchRef: { name: 'main' } },
     headRepository: { nameWithOwner: 'org/repo' }, commits: { nodes: [] }, labels: { nodes: [] } };
-  for (const state of ['OPEN', 'CLOSED', 'fork', 'failure', 'ambiguous', 'truncated']) {
+  for (const state of ['OPEN', 'CLOSED', 'MERGED', 'fork', 'failure', 'ambiguous', 'truncated']) {
     let lookups = 0;
     const list = createGitHub({ getToken: async () => 'test', fetchImpl: async (_url, options) => {
       const body = JSON.parse(options.body);
       if (body.query.includes('query DependencyParents')) {
         lookups++;
+        assert.match(body.query, /states: \[OPEN, CLOSED, MERGED\]/);
         assert.equal(body.variables.branch0, 'parent');
         assert.equal(body.variables.owner0, 'org');
         assert.equal(body.variables.repo0, 'repo');
         if (state === 'failure') return new Response('', { status: 500 });
-        const parent = { id: 'parent', number: 488, state: state === 'CLOSED' ? 'CLOSED' : 'OPEN', headRefName: 'parent', headRepository: { nameWithOwner: state === 'fork' ? 'fork/repo' : 'org/repo' } };
+        const parent = { id: 'parent', number: 488, state: ['CLOSED', 'MERGED'].includes(state) ? state : 'OPEN', headRefName: 'parent', headRepository: { nameWithOwner: state === 'fork' ? 'fork/repo' : 'org/repo' } };
         return Response.json({ data: { p0: { pullRequests: { pageInfo: { hasNextPage: state === 'truncated' }, nodes: state === 'ambiguous' ? [parent, { ...parent, id: 'other' }] : [parent] } } } });
       }
       return Response.json({ data: { viewer: { login: 'viewer' }, search: { issueCount: 2, pageInfo: {}, nodes: [raw, { ...raw, id: 'root', baseRefName: 'main' }] } } });
     } });
     for (let i = 0; i < 2; i++) {
       const result = await list({ query: 'is:pr' });
-      assert.equal(result.items[0].dependencyParent?.number ?? null, ['OPEN', 'CLOSED'].includes(state) ? 488 : null);
+      assert.equal(result.items[0].dependencyParent?.number ?? null, ['OPEN', 'CLOSED', 'MERGED'].includes(state) ? 488 : null);
+      if (state === 'MERGED') assert.equal(result.items[0].dependencyParent.status, 'MERGED');
       assert.equal(result.items[1].dependencyParent, null);
     }
     assert.equal(lookups, 1);
   }
+});
+
+test('merged parents are labeled without an active edge or standalone gutter', () => {
+  const parent = pr('A', 'main', { number: 42, status: 'MERGED' });
+  const child = pr('B', 'A', { number: 43 });
+  for (const allItems of [[parent, child], [child]]) {
+    const graph = dependencyLanes([{ ...child, dependencyParent: parent }], { allItems });
+    assert.equal(graph.gutter, 0);
+    assert.equal(graph.rows[0].mergedParent.number, 42);
+    assert.equal(graph.rows[0].externalParent, null);
+    assert.equal(graph.rows[0].parentIndex, -1);
+  }
+  const stale = dependencyLanes([{ ...child, dependencyParent: { ...parent, status: 'OPEN' } }], { allItems: [parent, child] });
+  assert.equal(stale.rows[0].mergedParent.number, 42);
+  assert.equal(stale.gutter, 0);
+  const stack = dependencyLanes([{ ...child, dependencyParent: parent }, pr('C', 'B', { number: 44 })]);
+  assert.equal(stack.rows[0].mergedParent.number, 42);
+  assert.equal(stack.rows[1].parentIndex, 0);
+  assert.equal(stack.rows[0].externalParent, null);
 });

@@ -101,7 +101,7 @@ export function createGitHub(options = {}) {
         Object.assign(variables, { [`owner${i}`]: owner, [`repo${i}`]: repo, [`branch${i}`]: pr.baseBranch });
         definitions.push(`$owner${i}: String!`, `$repo${i}: String!`, `$branch${i}: String!`);
         queries.push(`p${i}: repository(owner: $owner${i}, name: $repo${i}) {
-          pullRequests(headRefName: $branch${i}, states: [OPEN, CLOSED], first: 10, orderBy: {field: UPDATED_AT, direction: DESC}) {
+          pullRequests(headRefName: $branch${i}, states: [OPEN, CLOSED, MERGED], first: 10, orderBy: {field: UPDATED_AT, direction: DESC}) {
             pageInfo { hasNextPage } nodes { id number state headRefName headRepository { nameWithOwner } }
           }
         }`);
