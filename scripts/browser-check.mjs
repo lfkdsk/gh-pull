@@ -237,3 +237,23 @@ test('single-method repositories need no selector and merge controls fit on mobi
   }
   assert.deepEqual(f.errors, []);
 });
+
+test('new-tab links release mouse focus but preserve keyboard focus on return', async t => {
+  const f = await fixture(t);
+  await f.open();
+  for (const selector of ['.footer-links a[href*="issues/new?title"]', '.pr-title']) {
+    const link = f.page.locator(selector).first();
+    let popup = f.page.waitForEvent('popup');
+    await link.click();
+    await (await popup).close();
+    await f.page.bringToFront();
+    assert.equal(await link.evaluate(e => e === document.activeElement), false);
+    await link.focus();
+    popup = f.page.waitForEvent('popup');
+    await link.press('Enter');
+    await (await popup).close();
+    await f.page.bringToFront();
+    assert.equal(await link.evaluate(e => e === document.activeElement), true);
+  }
+  assert.deepEqual(f.errors, []);
+});
