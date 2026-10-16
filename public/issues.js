@@ -43,6 +43,7 @@ export function createIssuePopover() {
   window.addEventListener('scroll', position, true);
   return {
     get isOpen() { return isOpen(); },
+    get pullId() { return isOpen() ? trigger?.closest('.pr-row')?.dataset.prId : null; },
     close() { if (isOpen()) panel.hidePopover(); },
     button(pr) {
       const count = pr.closingIssueCount ?? pr.closingIssues?.length ?? 0;

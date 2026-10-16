@@ -14,6 +14,7 @@ import { createUpdateCheck } from './extension-updates.js';
 const assets = new Map([
   ['/', ['index.html', 'text/html']],
   ['/app.js', ['app.js', 'text/javascript']],
+  ['/row.js', ['row.js', 'text/javascript']],
   ['/model.js', ['model.js', 'text/javascript']],
   ['/dependencies.js', ['dependencies.js', 'text/javascript']],
   ['/vendor/svg.js', ['vendor/svg.js', 'text/javascript']],
