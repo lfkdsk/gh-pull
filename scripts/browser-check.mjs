@@ -195,6 +195,14 @@ test('merge choices follow live repository options and preserve a valid selectio
   await select.focus();
   await select.press('ArrowDown');
   assert.equal(await select.inputValue(), 'REBASE');
+  await select.press('Enter');
+  await select.press('Escape');
+  await f.page.mouse.move(0, 0);
+  const border = await select.evaluate(e => {
+    const style = getComputedStyle(e.closest('.merge-split'));
+    return { width: style.borderTopWidth, shadow: style.boxShadow, outline: style.outlineStyle };
+  });
+  assert.deepEqual(border, { width: '1px', shadow: 'none', outline: 'none' }, 'selection keeps a single thin border even while focused');
   assert.equal(await f.page.locator('.merge-action').textContent(), 'Rebase and merge');
   await f.refresh();
   assert.equal(await select.inputValue(), 'REBASE');
