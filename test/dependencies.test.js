@@ -116,3 +116,29 @@ test('merged parents are labeled without an active edge or standalone gutter', (
   assert.equal(stack.rows[1].parentIndex, 0);
   assert.equal(stack.rows[0].externalParent, null);
 });
+
+test('successful merge invalidates the cached dependency parent state', async () => {
+  let merged = false, lookups = 0;
+  const parent = { id: 'parent', __typename: 'PullRequest', number: 42, state: 'OPEN', isDraft: false,
+    author: { login: 'alice' }, headRefName: 'parent', headRefOid: 'a'.repeat(40), mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN',
+    repository: { nameWithOwner: 'org/repo', defaultBranchRef: { name: 'main' }, viewerPermission: 'WRITE', squashMergeAllowed: true },
+    headRepository: { nameWithOwner: 'org/repo' }, commits: { nodes: [] }, labels: { nodes: [] } };
+  const child = { ...parent, id: 'child', number: 43, headRefName: 'child', baseRefName: 'parent' };
+  const list = createGitHub({ getToken: async () => 'test', fetchImpl: async (_url, options) => {
+    const { query } = JSON.parse(options.body);
+    if (query.includes('query DependencyParents')) {
+      lookups++;
+      return Response.json({ data: { p0: { pullRequests: { pageInfo: { hasNextPage: false }, nodes: [{ ...parent, state: merged ? 'MERGED' : 'OPEN' }] } } } });
+    }
+    if (query.includes('mutation')) {
+      merged = true;
+      return Response.json({ data: { mergePullRequest: { pullRequest: { id: parent.id, state: 'MERGED', updatedAt: new Date().toISOString() } } } });
+    }
+    if (query.includes('node(id:')) return Response.json({ data: { node: parent, viewer: { login: 'alice' } } });
+    return Response.json({ data: { viewer: { login: 'alice' }, search: { issueCount: 1, pageInfo: {}, nodes: [child] } } });
+  } });
+  assert.equal((await list({ query: 'is:pr' })).items[0].dependencyParent.status, 'OPEN');
+  await list.merge({ id: parent.id, headOid: parent.headRefOid, mergeMethod: 'SQUASH' });
+  assert.equal((await list({ query: 'is:pr' })).items[0].dependencyParent.status, 'MERGED');
+  assert.equal(lookups, 2);
+});

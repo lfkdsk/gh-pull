@@ -191,6 +191,7 @@ export function createGitHub(options = {}) {
     }`, { input: { pullRequestId: id, expectedHeadOid: headOid, mergeMethod } });
     const merged = data.mergePullRequest?.pullRequest;
     if (merged?.state !== 'MERGED') throw new ApiError('GitHub did not confirm the merge. Refresh to check its status.');
+    dependencyCache.clear();
     return { id: merged.id, status: 'MERGED', updatedAt: merged.updatedAt, canMerge: false };
   };
 

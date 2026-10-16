@@ -337,9 +337,11 @@ async function mergePull(pr, mergeMethod) {
   await changePull(pr, merges, {
     action: 'merge', input: { headOid: pr.headOid, mergeMethod },
     message: `Merged ${pr.repo} #${pr.number}`,
+    onSuccess: () => { void load({ refresh: true, background: true }); },
     apply(current, data) {
       if (!current) return;
       Object.assign(current, data);
+      items = items.map(item => mergedStore.reconcile(item));
       if (!matchesQueryState(current, appliedQuery)) {
         items = items.filter(item => item.id !== pr.id);
         total = Math.max(0, total - 1);

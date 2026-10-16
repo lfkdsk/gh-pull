@@ -90,3 +90,32 @@ test('parent labels track merged and closed states after refresh without a merge
   }
   assert.deepEqual(errors, []);
 });
+
+test('merging a loaded parent updates its child immediately and refreshes without restoring stale metadata', async t => {
+  const parent = { ...scenario3a[0], canMerge: true, mergeMethod: 'SQUASH', mergeMethods: ['SQUASH'], headOid: 'a'.repeat(40) };
+  const child = { ...scenario3a[1], dependencyParent: { id: parent.id, number: parent.number, status: 'OPEN' } };
+  let reads = 0, merged = false, release;
+  const held = new Promise(resolve => { release = resolve; });
+  t.after(() => release());
+  const { page, origin, errors } = await browserFixture(t, {
+    list: async () => {
+      reads++;
+      if (merged) await held;
+      return { viewer: 'alice', total: 2, items: [parent, child], pageInfo: { hasNextPage: false } };
+    },
+    merge: async () => { merged = true; return { id: parent.id, status: 'MERGED', canMerge: false, updatedAt: new Date().toISOString() }; },
+  });
+  await page.goto(origin);
+  await page.locator('.merge-action').click();
+  await page.waitForFunction(() => document.querySelector('.dependency-chip')?.textContent === '↑ #495 · merged');
+  assert.equal(await page.locator('.dependency-external').count(), 0);
+  assert.equal(await page.locator('.pr-row').count(), 1);
+  const before = reads;
+  await page.waitForFunction(() => document.querySelector('#refresh').disabled);
+  release();
+  await page.waitForFunction(() => !document.querySelector('#refresh').disabled);
+  assert.ok(reads >= 2 && reads >= before, 'merge triggers a list refresh');
+  assert.equal(await page.locator('.dependency-chip').innerText(), '↑ #495 · merged');
+  assert.equal(await page.locator('.pr-row').count(), 1);
+  assert.deepEqual(errors, []);
+});
