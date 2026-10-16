@@ -17,7 +17,7 @@ const loads = createLatestRequest();
 const mergedStore = createMergedStore();
 const mergeSelections = new Map();
 const polling = createPollingSchedule();
-const issuePopover = createIssuePopover();
+const issuePopover = createIssuePopover({ onClose: () => polling.invalidate() });
 let statusLoading = false, statusController, statusOffset = 0, loadedPages = 1;
 let events;
 let authMode = 'local', authenticated = false;
@@ -381,6 +381,7 @@ function titleEditor(pr) {
   const close = () => {
     if (draft.saving) return;
     titleEdits.delete(pr.id); render(); focusTitleControl(pr.id, '.edit-title');
+    polling.invalidate();
   };
   cancel.addEventListener('click', close);
   input.addEventListener('input', () => {
@@ -417,7 +418,14 @@ const groupCache = new Map();
 function place(parent, child, before) {
   if (child === before) return;
   if (child.parentElement === parent && parent.moveBefore) parent.moveBefore(child, before);
-  else parent.insertBefore(child, before);
+  else {
+    const focused = child.contains(document.activeElement) ? document.activeElement : null;
+    const selection = focused && typeof focused.selectionStart === 'number'
+      ? [focused.selectionStart, focused.selectionEnd, focused.selectionDirection] : null;
+    parent.insertBefore(child, before);
+    focused?.focus({ preventScroll: true });
+    if (selection) focused.setSelectionRange(...selection);
+  }
 }
 
 function render() {
@@ -451,7 +459,8 @@ function render() {
     }
     const graph = dependencyLanes(prs, { allItems: items, sort: queryPresets(appliedQuery).sort });
     list.classList.toggle('has-dependency-lanes', Boolean(graph.gutter));
-    list.style.setProperty('--lane-gutter', `${graph.gutter}px`);
+    if (graph.gutter) list.style.setProperty('--lane-gutter', `${graph.gutter}px`);
+    else list.style.removeProperty('--lane-gutter');
     const groupIds = new Set(graph.rows.map(node => node.pr.id));
     let rowsChanged = false;
     for (const entry of [...list.children]) if (!groupIds.has(entry.querySelector('.pr-row')?.dataset.prId)) {
@@ -462,6 +471,9 @@ function render() {
       const { pr } = node;
       activeRows.add(pr.id);
       // updatedAt alone misses changes to checks, reviews and merge readiness.
+      // Read/unread styling is patched by updateTitleBrightness(), not this key.
+      // Retained callbacks can use their original PR snapshot because the key
+      // compares all PR fields; mutations resolve the current item by ID.
       const local = JSON.stringify([titleEdits.has(pr.id), titleEdits.get(pr.id)?.saving,
         titleEdits.get(pr.id)?.error, draftChanges.get(pr.id), merges.get(pr.id)]);
       const signature = JSON.stringify([pr, local, viewerLogin, authMode,
@@ -479,6 +491,13 @@ function render() {
         rowCache.set(pr.id, cached);
         rowsChanged = true;
       }
+      // Structural gutter changes must not detach a protected editor/popover.
+      // Its dependency labels catch up when protection ends and the row rebuilds.
+      const gutter = cached.entry.querySelector('.dependency-gutter');
+      if (graph.gutter && !gutter) {
+        const spacer = element('div', undefined, 'dependency-gutter');
+        spacer.setAttribute('aria-hidden', 'true'); cached.entry.prepend(spacer);
+      } else if (!graph.gutter) gutter?.remove();
       if (cached.entry !== nextRow) rowsChanged = true;
       place(list, cached.entry, nextRow);
       nextRow = cached.entry.nextElementSibling;
@@ -564,7 +583,15 @@ async function load({ append = false, refresh = false, background = false } = {}
     // Preserve only active rows; unrelated PRs can continue refreshing.
     const protectedItems = new Map(items.filter(pr => protectedPull(pr.id)).map(pr => [pr.id, pr]));
     data.items = data.items.map(pr => protectedItems.get(pr.id) ?? mergedStore.reconcile(pr));
-    for (const [id, pr] of protectedItems) if (!data.items.some(item => item.id === id)) data.items.push(pr);
+    let retainedMissing = 0;
+    for (const [index, pr] of items.entries()) {
+      if (protectedItems.has(pr.id) && !data.items.some(item => item.id === pr.id)) {
+        data.items.splice(Math.min(index, data.items.length), 0, pr);
+        retainedMissing++;
+      }
+    }
+    // These rows remain visible locally until protection ends and we refetch.
+    if (!append) data.total += retainedMissing;
     const excluded = new Set(data.items.filter(pr => !matchesQueryState(pr, appliedQuery)).map(pr => pr.id));
     data.items = data.items.filter(pr => !excluded.has(pr.id));
     data.total = Math.max(0, data.total - excluded.size);

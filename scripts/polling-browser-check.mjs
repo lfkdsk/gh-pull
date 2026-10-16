@@ -89,11 +89,11 @@ test('polling pauses while hidden or offline, but preserves edits while refreshi
   const before = f.counts();
   await page.clock.fastForward(60_000);
   await f.idle();
-  assert.ok(f.counts()[0] > before[0]);
+  assert.equal(f.counts()[0], before[0] + 1);
   assert.equal(await page.locator('.title-editor input').inputValue(), 'Keep my draft');
   await page.press('.title-editor input', 'Escape');
   await page.clock.fastForward(1000); await f.idle();
-  assert.ok(f.counts()[0] > before[0]);
+  assert.equal(f.counts()[0], before[0] + 2);
 });
 
 test('rate-limit backoff survives returning to the tab and preserves existing rows', async t => {

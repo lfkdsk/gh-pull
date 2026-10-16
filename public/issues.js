@@ -12,7 +12,7 @@ function githubLink(text, url, className) {
 
 // One native popover is shared by all rows: outside click, Escape, and keyboard
 // focus restoration are handled by the browser, without per-row global listeners.
-export function createIssuePopover() {
+export function createIssuePopover({ onClose = () => {} } = {}) {
   const panel = element('div', undefined, 'issue-popover');
   panel.id = 'closing-issues'; panel.popover = 'auto';
   panel.setAttribute('role', 'dialog'); panel.setAttribute('aria-labelledby', 'closing-issues-title');
@@ -39,6 +39,7 @@ export function createIssuePopover() {
     }
     trigger?.setAttribute('aria-expanded', String(opening));
   });
+  panel.addEventListener('toggle', event => { if (event.newState === 'closed') onClose(); });
   window.addEventListener('resize', position);
   window.addEventListener('scroll', position, true);
   return {

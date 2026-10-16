@@ -15,6 +15,7 @@ async function fixture(t) {
   const list = async () => ({ viewer: 'alice', total: items.length, items, pageInfo: { hasNextPage: false } });
   list.status = async () => ({ items });
   const f = await browserFixture(t, { list });
+  await f.page.route(/\/api\/pulls\?/, async route => route.fulfill({ json: await list() }));
   await f.page.clock.install();
   await f.page.goto(f.origin);
   await f.page.locator('.pr-row').first().waitFor();
@@ -71,4 +72,53 @@ test('background updates refresh other rows without replacing an active editor o
   await f.refresh();
   assert.equal(await page.locator('[data-pr-id="pr-1"] .pr-title').textContent(), 'Server title');
   assert.deepEqual(f.errors, []);
+});
+
+test('missing protected rows retain their position and refetch when editing ends', async t => {
+  const f = await fixture(t), { page } = f;
+  f.update('pr-2', { baseBranch: 'main' }); await f.refresh();
+  await page.locator('[data-pr-id="pr-1"] .edit-title').click();
+  f.remove('pr-1');
+  await page.clock.fastForward(30000); await f.idle();
+  assert.equal(await page.locator('.pr-row').first().getAttribute('data-pr-id'), 'pr-1');
+  assert.equal(await page.locator('#summary').textContent(), '3 loaded · 3 total');
+  await page.locator('.title-editor input').press('Escape');
+  await page.clock.fastForward(1000); await f.idle();
+  assert.equal(await page.locator('.pr-row[data-pr-id="pr-1"]').count(), 0);
+  assert.equal(await page.locator('#summary').textContent(), '2 loaded · 2 total');
+});
+
+test('protected rows gain and lose dependency gutters without replacing their editor', async t => {
+  const f = await fixture(t), { page } = f;
+  f.update('pr-2', { baseBranch: 'main' }); await f.refresh();
+  await page.locator('[data-pr-id="pr-1"] .edit-title').click();
+  await page.evaluate(() => { window.editor = document.querySelector('.title-editor input'); });
+  f.update('pr-2', { baseBranch: 'feature/1' });
+  await page.clock.fastForward(30000); await f.idle();
+  assert.equal(await page.locator('.dependency-node').filter({has: page.locator('[data-pr-id="pr-1"]')}).locator('.dependency-gutter').count(), 1);
+  assert.equal(await page.evaluate(() => document.activeElement === window.editor), true);
+  f.update('pr-2', { baseBranch: 'main' });
+  await page.clock.fastForward(30000); await f.idle();
+  assert.equal(await page.locator('.dependency-gutter').count(), 0);
+  assert.equal(await page.evaluate(() => document.activeElement === window.editor), true);
+});
+
+
+test('fallback DOM moves preserve focus and selection without moveBefore', async t => {
+  const f = await fixture(t), { page } = f;
+  await page.evaluate(() => { Element.prototype.moveBefore = undefined; });
+  await page.locator('[data-pr-id="pr-3"] .edit-title').click();
+  await page.locator('.title-editor input').fill('Keep selection');
+  await page.evaluate(() => {
+    window.editor = document.querySelector('.title-editor input');
+    window.editor.setSelectionRange(2, 7);
+  });
+  f.update('pr-1', { updatedAt: '2025-01-01T00:00:00Z' });
+  f.update('pr-2', { updatedAt: '2025-01-01T00:00:00Z' });
+  await page.clock.fastForward(15000); await f.idle();
+  assert.equal(await page.evaluate(() => document.activeElement === window.editor), true);
+  // Re-grouping moves retained entries between lists on older browsers too.
+  await page.selectOption('#group', 'author');
+  assert.equal(await page.evaluate(() => window.editor.isConnected), true);
+  assert.deepEqual(await page.evaluate(() => [window.editor.value, window.editor.selectionStart, window.editor.selectionEnd]), ['Keep selection', 2, 7]);
 });
