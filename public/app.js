@@ -229,6 +229,8 @@ function createMergeAction(pr, prUrl) {
   const controls = element('span', undefined, 'merge-controls');
   controls.append(merge);
   if (methods.length > 1) {
+    controls.classList.add('merge-split');
+    const chooser = element('span', undefined, 'merge-method-trigger open');
     const select = element('select', undefined, 'merge-method');
     select.setAttribute('aria-label', `Merge method for ${pr.repo} #${pr.number}`);
     select.title = 'Merge method';
@@ -245,7 +247,8 @@ function createMergeAction(pr, prUrl) {
       merge.textContent = labels[selected];
       merge.setAttribute('aria-label', `${labels[selected]} ${pr.repo} #${pr.number}`);
     });
-    controls.append(select);
+    chooser.append(select);
+    controls.append(chooser);
   }
   if (blockedAccess) {
     const message = pr.mergeAccess?.message || 'Could not verify app access. Refresh to try again.';

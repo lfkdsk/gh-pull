@@ -192,7 +192,9 @@ test('merge choices follow live repository options and preserve a valid selectio
   await f.open();
   const select = f.page.getByRole('combobox', { name: 'Merge method for example/dashboard #1' });
   assert.equal(await select.inputValue(), 'SQUASH');
-  await select.selectOption('REBASE');
+  await select.focus();
+  await select.press('ArrowDown');
+  assert.equal(await select.inputValue(), 'REBASE');
   assert.equal(await f.page.locator('.merge-action').textContent(), 'Rebase and merge');
   await f.refresh();
   assert.equal(await select.inputValue(), 'REBASE');
@@ -219,6 +221,10 @@ test('single-method repositories need no selector and merge controls fit on mobi
     await f.page.emulateMedia({ colorScheme });
     await f.page.setViewportSize({ width: 375, height: 900 });
     assert.equal(await f.page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+    const button = await f.page.locator('.merge-action').boundingBox();
+    const arrow = await f.page.locator('.merge-method').boundingBox();
+    assert.ok(Math.abs(button.x + button.width - arrow.x) <= 1, 'arrow joins the merge button');
+    assert.ok(Math.abs(button.height - arrow.height) <= 1, 'both halves have matching heights');
     await f.page.screenshot({ path: `/tmp/gh-pull-merge-method-${colorScheme}.png`, fullPage: true });
   }
   assert.deepEqual(f.errors, []);
