@@ -547,6 +547,10 @@ function render() {
           : state === 'closed' ? 'Parent PR was closed without merging'
           : node.externalParent ? 'Parent PR is outside this group’s loaded open results' : 'Parent PR is beyond the four visible lanes';
         meta.append(chip);
+      } else if (node.unloadedBase) {
+        const chip = element('span', '↑ base not loaded', 'dependency-chip');
+        chip.title = `Base branch: ${pr.baseBranch}. Its parent PR could not be identified in the loaded results or GitHub lookup.`;
+        meta.append(chip);
       }
       if (pr.branch) {
         const branch = element('button', undefined, 'branch-copy');

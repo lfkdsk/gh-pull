@@ -119,3 +119,25 @@ test('merging a loaded parent updates its child immediately and refreshes withou
   assert.equal(await page.locator('.pr-row').count(), 1);
   assert.deepEqual(errors, []);
 });
+
+test('non-default base without an identifiable PR shows base not loaded until retargeted', async t => {
+  let baseBranch = 'merge-train/spartan';
+  const { page, origin, errors } = await browserFixture(t, {
+    list: async () => ({ viewer: 'viewer', total: 1, items: [{ ...scenario3a[1], title: 'refactor: split wallet fee option calculation',
+      baseBranch, defaultBranch: 'next', dependencyParent: null }], pageInfo: { hasNextPage: false } }),
+  });
+  await page.goto(origin);
+  const chip = page.locator('.dependency-chip');
+  await chip.waitFor();
+  assert.equal(await chip.innerText(), '↑ base not loaded');
+  assert.match(await chip.getAttribute('title'), /merge-train\/spartan/);
+  assert.equal(await page.locator('.dependency-edge').count(), 0);
+  assert.equal(await page.locator('.dependency-external').count(), 1);
+  assert.equal(await page.locator('.dependency-dot').count(), 1);
+  assert.equal(await page.locator('.dependency-connector').getAttribute('width'), '32');
+  baseBranch = 'next';
+  await page.locator('#refresh').click();
+  await chip.waitFor({ state: 'detached' });
+  assert.equal(await page.locator('.dependency-connector').count(), 0);
+  assert.deepEqual(errors, []);
+});

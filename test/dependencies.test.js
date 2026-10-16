@@ -142,3 +142,18 @@ test('successful merge invalidates the cached dependency parent state', async ()
   assert.equal((await list({ query: 'is:pr' })).items[0].dependencyParent.status, 'MERGED');
   assert.equal(lookups, 2);
 });
+
+test('unresolved non-default bases retain a label without guessing a parent PR', () => {
+  const child = pr('wallet', 'merge-train/spartan', { defaultBranch: 'next' });
+  const graph = dependencyLanes([child]);
+  assert.equal(graph.rows[0].unloadedBase, true);
+  assert.equal(graph.rows[0].lane, 0);
+  assert.equal(graph.gutter, 32);
+  for (const fields of [{ baseBranch: 'next' }, { baseBranch: '' }, { defaultBranch: '' }, { status: 'MERGED' },
+    { dependencyParent: { id: 'parent', number: 42, status: 'MERGED' } },
+    { dependencyParent: { id: 'parent', number: 42, status: 'OPEN' } }]) {
+    assert.equal(dependencyLanes([{ ...child, ...fields }]).rows[0].unloadedBase, false);
+  }
+  const parent = pr('parent', 'next', { branch: child.baseBranch, defaultBranch: 'next' });
+  assert.equal(dependencyLanes([parent, child]).rows[1].unloadedBase, false);
+});

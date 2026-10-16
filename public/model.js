@@ -92,7 +92,7 @@ export function dependencyForest(items, { allItems = items, sort = 'query' } = {
   const matches = (parent, child) => parent.id !== child.id && parent.branch &&
     parent.branch === child.baseBranch && parent.repo.toLowerCase() === child.repo.toLowerCase() &&
     parent.branchRepository?.toLowerCase() === child.repo.toLowerCase();
-  const nodes = new Map(items.map(pr => [pr.id, { pr, parent: null, children: [], externalParent: null, mergedParent: null }]));
+  const nodes = new Map(items.map(pr => [pr.id, { pr, parent: null, children: [], externalParent: null, mergedParent: null, unloadedBase: false }]));
   for (const node of nodes.values()) {
     const pr = node.pr;
     if (!active(pr) || !pr.baseBranch || pr.baseBranch === pr.defaultBranch) continue;
@@ -108,6 +108,7 @@ export function dependencyForest(items, { allItems = items, sort = 'query' } = {
         else if (['OPEN', 'DRAFT', 'CLOSED'].includes(known.status)) node.externalParent = known;
       }
     }
+    node.unloadedBase = Boolean(pr.defaultBranch && !node.parent && !node.externalParent && !node.mergedParent);
   }
   for (const node of nodes.values()) {
     const seen = new Set([node]);
@@ -153,7 +154,7 @@ export function dependencyLanes(items, options) {
   const busy = [], hasFirstChild = new Set();
   rows.forEach((node, i) => {
     if (node.parentIndex < 0) {
-      if (node.children.length || node.externalParent) node.lane = 0;
+      if (node.children.length || node.externalParent || node.unloadedBase) node.lane = 0;
       return;
     }
     const parent = rows[node.parentIndex];
