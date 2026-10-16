@@ -67,7 +67,7 @@ test('active checks refresh at 15s, lists at 30s, with rows retained and refresh
   assert.deepEqual(f.errors, []);
 });
 
-test('polling pauses while hidden, offline or editing, and resumes when stale without losing edits', async t => {
+test('polling pauses while hidden or offline, but preserves edits while refreshing', async t => {
   const f = await pollingFixture(t), { page } = f;
   for (const property of ['fixtureHidden', 'fixtureOnline']) {
     await page.evaluate(property => {
@@ -88,11 +88,12 @@ test('polling pauses while hidden, offline or editing, and resumes when stale wi
   await page.click('.edit-title'); await page.fill('.title-editor input', 'Keep my draft');
   const before = f.counts();
   await page.clock.fastForward(60_000);
-  assert.deepEqual(f.counts(), before);
+  await f.idle();
+  assert.equal(f.counts()[0], before[0] + 1);
   assert.equal(await page.locator('.title-editor input').inputValue(), 'Keep my draft');
   await page.press('.title-editor input', 'Escape');
   await page.clock.fastForward(1000); await f.idle();
-  assert.equal(f.counts()[0], before[0] + 1);
+  assert.equal(f.counts()[0], before[0] + 2);
 });
 
 test('rate-limit backoff survives returning to the tab and preserves existing rows', async t => {

@@ -1,3 +1,4 @@
+import { renderRow } from './row.js';
 import { drawDependencies } from './dependencies.js';
 import { createPollingSchedule, pendingPulls } from './polling.js';
 import { createViewedStore, createLatestRequest, mergePullPages, createMergedStore } from './state.js';
@@ -16,7 +17,7 @@ const loads = createLatestRequest();
 const mergedStore = createMergedStore();
 const mergeSelections = new Map();
 const polling = createPollingSchedule();
-const issuePopover = createIssuePopover();
+const issuePopover = createIssuePopover({ onClose: () => polling.invalidate() });
 let statusLoading = false, statusController, statusOffset = 0, loadedPages = 1;
 let events;
 let authMode = 'local', authenticated = false;
@@ -28,7 +29,7 @@ function scheduleMergeReadiness(attempt = 0) {
   if (polling.backingOff || document.hidden || !navigator.onLine || !authenticated || attempt >= 5 || !items.some(pr => pr.mergePending && pr.status === 'OPEN')) return;
   const version = loads.revision;
   readinessTimer = setTimeout(async () => {
-    if (polling.backingOff || statusLoading || document.hidden || !navigator.onLine || loading || editingPull()) {
+    if (polling.backingOff || statusLoading || document.hidden || !navigator.onLine || loading) {
       scheduleMergeReadiness(attempt);
       return;
     }
@@ -40,13 +41,13 @@ function scheduleMergeReadiness(attempt = 0) {
       const response = await apiFetch(`/api/pulls/readiness?${query}`, { signal: requestController.signal });
       if (!response.ok) throw responseError(response, await response.json(), 'Could not check merge readiness.');
       const data = await response.json();
-      if (version !== loads.revision || requestController.signal.aborted || !authenticated || editingPull()) return;
+      if (version !== loads.revision || requestController.signal.aborted || !authenticated) return;
       for (const update of data.items) {
         const pr = items.find(item => item.id === update.id);
         // Never offer a merge against a commit that is not the displayed version.
-        if (pr?.status === 'OPEN' && pr.headOid === update.headOid) Object.assign(pr, update);
+        if (pr?.status === 'OPEN' && !protectedPull(pr.id) && pr.headOid === update.headOid) Object.assign(pr, update);
       }
-      if (!titleEdits.size) render();
+      render();
     } catch (error) {
       if (error.retryAfter) polling.failed(error.retryAfter);
       // Normal polling retries unresolved merge readiness.
@@ -79,8 +80,8 @@ function updateRefreshButton() {
   $('refresh').setAttribute('aria-busy', String(busy));
 }
 
-function editingPull() {
-  return issuePopover.isOpen || titleEdits.size || [...draftChanges.values(), ...merges.values()].some(change => change.saving);
+function protectedPull(id) {
+  return titleEdits.has(id) || issuePopover.pullId === id || draftChanges.get(id)?.saving || merges.get(id)?.saving;
 }
 function responseError(response, data, fallback) {
   const error = new Error(data.error || fallback);
@@ -106,13 +107,11 @@ async function refreshStatus() {
     if (!response.ok) throw responseError(response, data, 'Could not refresh running checks.');
     if (version !== loads.revision || controller.signal.aborted || !authenticated) return;
     polling.succeeded('status');
-    // Edits may start while the request is in flight. Never replace those controls.
-    if (editingPull()) return;
     let changed = false, reconcile = false;
     for (const incoming of data.items) {
       const update = mergedStore.reconcile(incoming);
       const current = items.find(pr => pr.id === update.id);
-      if (!current || Date.parse(update.updatedAt) < Date.parse(current.updatedAt)) continue;
+      if (!current || protectedPull(current.id) || Date.parse(update.updatedAt) < Date.parse(current.updatedAt)) continue;
       if (JSON.stringify(current) !== JSON.stringify(update)) {
         reconcile ||= ['status', 'checks', 'review'].some(key => current[key] !== update[key]);
         Object.assign(current, update); changed = true;
@@ -138,7 +137,7 @@ async function refreshStatus() {
 function poll() {
   if (!authenticated || !queryEditor || queryError(appliedQuery)) return;
   const kind = polling.due({ visible: !document.hidden, online: navigator.onLine,
-    busy: loading || statusLoading || Boolean(editingPull()), pending: pendingPulls(items).length > 0 });
+    busy: loading || statusLoading, pending: pendingPulls(items).length > 0 });
   if (kind === 'list') load({ refresh: true, background: true });
   else if (kind === 'status') refreshStatus();
   updateRefreshButton();
@@ -382,6 +381,7 @@ function titleEditor(pr) {
   const close = () => {
     if (draft.saving) return;
     titleEdits.delete(pr.id); render(); focusTitleControl(pr.id, '.edit-title');
+    polling.invalidate();
   };
   cancel.addEventListener('click', close);
   input.addEventListener('input', () => {
@@ -410,237 +410,121 @@ function titleEditor(pr) {
   return form;
 }
 
-let clearDependencyDrawings = () => {};
+const rowCache = new Map();
+const groupCache = new Map();
+
+// Keep retained nodes mounted; moving a node only when its order changes also
+// preserves browser-managed focus and popover state on ordinary refreshes.
+function place(parent, child, before) {
+  if (child === before) return;
+  if (child.parentElement === parent && parent.moveBefore) parent.moveBefore(child, before);
+  else {
+    const focused = child.contains(document.activeElement) ? document.activeElement : null;
+    const selection = focused && typeof focused.selectionStart === 'number'
+      ? [focused.selectionStart, focused.selectionEnd, focused.selectionDirection] : null;
+    parent.insertBefore(child, before);
+    focused?.focus({ preventScroll: true });
+    if (selection) focused.setSelectionRange(...selection);
+  }
+}
+
 function render() {
-  clearDependencyDrawings();
-  issuePopover.close();
   const { count, groups } = groupPulls(items, { group: $('group').value, sort: 'query' });
   updateSummary();
-  const fragment = document.createDocumentFragment();
-  const laneGroups = [];
+  const results = $('results'), activeGroups = new Set(), activeRows = new Set();
+  let nextSection = results.firstElementChild;
+  const ctx = { viewedStore, markViewed, viewerLogin, draftChanges, merges, titleEdits, changeDraftStatus, badge, usernameBadge, repositoryLink, render, focusTitleControl, createMergeAction, issuePopover, titleEditor };
   for (const [name, prs] of groups) {
-    const section = element('details', undefined, 'pr-group');
     const key = `${$('group').value}:${name}`;
-    section.open = !collapsed.has(key);
-    section.addEventListener('toggle', () => section.open ? collapsed.delete(key) : collapsed.add(key));
-    const heading = element('summary');
-    if ($('group').value === 'repo') heading.append(repositoryLink(name), document.createTextNode(` (${prs.length})`));
-    else if ($('group').value === 'author') heading.append(usernameLink(name), document.createTextNode(` (${prs.length})`));
-    else heading.textContent = `${labels[name] ?? name} (${prs.length})`;
-    section.append(heading);
-    const graph = dependencyLanes(prs, { allItems: items, sort: queryPresets(appliedQuery).sort });
-    const list = element('ul', undefined, 'pr-list');
-    if (graph.gutter) {
-      list.classList.add('has-dependency-lanes');
-      list.style.setProperty('--lane-gutter', `${graph.gutter}px`);
-      laneGroups.push({ list, graph });
+    activeGroups.add(key);
+    let group = groupCache.get(key);
+    if (!group) {
+      const section = element('details', undefined, 'pr-group');
+      section.open = !collapsed.has(key);
+      section.addEventListener('toggle', () => section.open ? collapsed.delete(key) : collapsed.add(key));
+      const heading = element('summary'), list = element('ul', undefined, 'pr-list');
+      section.append(heading, list);
+      group = { section, heading, list, clear: () => {} };
+      groupCache.set(key, group);
     }
-    const renderDependency = (node, target) => {
+    const { section, heading, list } = group;
+    place(results, section, nextSection);
+    nextSection = section.nextElementSibling;
+    if (group.count !== prs.length) {
+      heading.replaceChildren();
+      if ($('group').value === 'repo') heading.append(repositoryLink(name), document.createTextNode(` (${prs.length})`));
+      else if ($('group').value === 'author') heading.append(usernameLink(name), document.createTextNode(` (${prs.length})`));
+      else heading.textContent = `${labels[name] ?? name} (${prs.length})`;
+      group.count = prs.length;
+    }
+    const graph = dependencyLanes(prs, { allItems: items, sort: queryPresets(appliedQuery).sort });
+    list.classList.toggle('has-dependency-lanes', Boolean(graph.gutter));
+    if (graph.gutter) list.style.setProperty('--lane-gutter', `${graph.gutter}px`);
+    else list.style.removeProperty('--lane-gutter');
+    const groupIds = new Set(graph.rows.map(node => node.pr.id));
+    let rowsChanged = false;
+    for (const entry of [...list.children]) if (!groupIds.has(entry.querySelector('.pr-row')?.dataset.prId)) {
+      entry.remove(); rowsChanged = true;
+    }
+    let nextRow = list.firstElementChild;
+    for (const node of graph.rows) {
       const { pr } = node;
-      const entry = element('li', undefined, 'dependency-node');
-      if (graph.gutter) {
-        const gutter = element('div', undefined, 'dependency-gutter');
-        gutter.setAttribute('aria-hidden', 'true');
-        entry.append(gutter);
+      activeRows.add(pr.id);
+      // updatedAt alone misses changes to checks, reviews and merge readiness.
+      // Read/unread styling is patched by updateTitleBrightness(), not this key.
+      // Retained callbacks can use their original PR snapshot because the key
+      // compares all PR fields; mutations resolve the current item by ID.
+      const local = JSON.stringify([titleEdits.has(pr.id), titleEdits.get(pr.id)?.saving,
+        titleEdits.get(pr.id)?.error, draftChanges.get(pr.id), merges.get(pr.id)]);
+      const signature = JSON.stringify([pr, local, viewerLogin, authMode,
+        [pr.author, ...(pr.reviewers ?? []).map(r => r.name)].map(name => nameColors[name.toLowerCase()]),
+        node.parent?.pr.id, node.parent?.pr.title, node.parent?.pr.number, node.externalParent,
+        node.mergedParent, node.unloadedBase, node.lane, Boolean(graph.gutter)]);
+      let cached = rowCache.get(pr.id);
+      const retained = cached && (cached.signature === signature ||
+        (protectedPull(pr.id) && cached.local === local));
+      if (!retained) {
+        const entry = renderRow(node, graph.gutter, ctx);
+        if (cached?.entry === nextRow) nextRow = cached.entry.nextElementSibling;
+        cached?.entry.remove();
+        cached = { entry, signature, local };
+        rowCache.set(pr.id, cached);
+        rowsChanged = true;
       }
-      const row = element('div', undefined, 'pr-row');
-      row.dataset.prId = pr.id;
-      const hasUpdates = viewedStore.hasUpdates(pr);
-      row.classList.toggle('has-updates', hasUpdates);
-      const onOpen = event => {
-        if ((event.type === 'click' && event.button === 0) || (event.type === 'auxclick' && event.button === 1)) {
-          if (event.target.closest('a[data-view-pr][href]')) markViewed(pr);
-        }
-      };
-      row.addEventListener('click', onOpen);
-      row.addEventListener('auxclick', onOpen);
-      const title = element('a', pr.title, 'pr-title');
-      // Only navigate to GitHub, even if an upstream response is malformed.
-      try { const url = new URL(pr.url); if (url.protocol === 'https:' && url.hostname === 'github.com') title.href = url.href; } catch { /* No unsafe link. */ }
-      title.target = '_blank'; title.rel = 'noopener noreferrer';
-      title.dataset.viewPr = '';
-      title.setAttribute('aria-label', `${hasUpdates ? 'New updates: ' : ''}${pr.title} (opens in a new tab)`);
-      const line = element('div', undefined, 'title-line');
-      if (node.parent) {
-        const relation = element('span', `Merges into #${node.parent.pr.number}: ${node.parent.pr.title}`, 'sr-only');
-        line.append(relation);
-      }
-      const feedback = element('span', undefined, 'sr-only');
-      feedback.setAttribute('role', 'status');
-      if (['OPEN', 'DRAFT'].includes(pr.status) && pr.author.toLowerCase() === viewerLogin.toLowerCase()) {
-        const pending = draftChanges.get(pr.id)?.saving ?? false;
-        const status = element('button', pending ? 'Updating…' : labels[pr.status], `badge ${pr.status.toLowerCase()} draft-action`);
-        status.type = 'button'; status.disabled = pending || Boolean(merges.get(pr.id)?.saving);
-        status.title = pr.status === 'OPEN' ? 'Convert to draft' : 'Mark ready for review';
-        status.setAttribute('aria-label', pr.status === 'OPEN' ? `Convert ${pr.title} to draft` : `Mark ${pr.title} ready for review`);
-        status.addEventListener('click', () => changeDraftStatus(pr));
-        line.append(status);
-      } else line.append(badge(labels[pr.status], pr.status));
-      if (title.hasAttribute('href')) {
-        const copy = element('button', undefined, 'copy-link icon-button');
-        copy.type = 'button';
-        copy.title = 'Copy PR link';
-        copy.setAttribute('aria-label', `Copy link to ${pr.title}`);
-        copy.append(icon('copy'));
-        clipboardFeedback(copy, { text: title.href, feedback, success: 'PR link copied' });
-        const actions = element('span', undefined, 'pr-links');
-        actions.append(copy);
-        const files = element('a', undefined, 'pr-files icon-button');
-        const url = new URL(title.href);
-        url.pathname = `${url.pathname.replace(/\/$/, '')}/files`;
-        url.search = ''; url.hash = '';
-        files.href = url.href;
-        files.target = '_blank'; files.rel = 'noopener noreferrer';
-        files.dataset.viewPr = '';
-        files.title = 'View code changes (opens in a new tab)';
-        files.setAttribute('aria-label', `View code changes for ${pr.title} (opens in a new tab)`);
-        files.append(icon('files'));
-        if (Number.isInteger(pr.changedFiles) && pr.changedFiles >= 0) {
-          files.append(element('span', String(pr.changedFiles), 'file-count'));
-          files.setAttribute('aria-label', `View code changes for ${pr.title}, ${pr.changedFiles} ${pr.changedFiles === 1 ? 'file' : 'files'} changed (opens in a new tab)`);
-        }
-        actions.append(files);
-        line.append(actions);
-      }
-      line.append(title);
-      if (pr.author.toLowerCase() === viewerLogin.toLowerCase()) {
-        const edit = element('button', undefined, 'edit-title icon-button');
-        edit.type = 'button'; edit.title = 'Edit PR title';
-        edit.setAttribute('aria-label', `Edit title of ${pr.title}`);
-        edit.disabled = Boolean(titleEdits.get(pr.id)?.saving || merges.get(pr.id)?.saving);
-        edit.append(icon('edit'));
-        edit.addEventListener('click', () => {
-          if (!titleEdits.has(pr.id)) titleEdits.set(pr.id, { value: pr.title, expectedTitle: pr.title, saving: false, error: '' });
-          render(); focusTitleControl(pr.id, '.title-editor input');
-        });
-        line.append(edit);
-      }
-      const mergeAction = createMergeAction(pr, title.getAttribute('href'));
-      if (mergeAction) line.append(mergeAction);
-      const meta = element('div', undefined, 'meta');
-      let checks = badge(labels[pr.checks] ?? pr.checks, pr.checks);
-      if (pr.checks === 'PENDING' && pr.checkCounts?.total > 0) {
-        checks.textContent += ` · ${pr.checkCounts.passed}/${pr.checkCounts.total}`;
-        checks.title = `${pr.checkCounts.passed} passed of ${pr.checkCounts.total} checks`;
-        checks.setAttribute('aria-label', `Checks pending: ${checks.title}`);
-      }
-      if (pr.checks === 'FAILURE' && title.hasAttribute('href')) {
-        checks = element('a', labels[pr.checks], 'badge failure');
-        const url = new URL(title.href);
-        url.pathname = `${url.pathname.replace(/\/$/, '')}/checks`;
-        url.search = ''; url.hash = '';
-        checks.href = url.href;
-        checks.target = '_blank'; checks.rel = 'noopener noreferrer';
-        checks.dataset.viewPr = '';
-        checks.title = 'View checks (opens in a new tab)';
-        checks.setAttribute('aria-label', `Checks failed: view checks for ${pr.title} (opens in a new tab)`);
-      }
-      const author = usernameBadge(pr.author);
-      const repo = element('span', undefined, 'badge');
-      repo.append(repositoryLink(pr.repo), document.createTextNode(` #${pr.number}`));
-      meta.append(repo, author, checks);
-      const dependency = node.mergedParent ?? node.externalParent ?? (node.lane > 3 ? node.parent?.pr : null);
-      if (dependency) {
-        const state = dependency.status === 'MERGED' ? 'merged' : dependency.status === 'CLOSED' ? 'closed' : node.externalParent ? 'not loaded' : '';
-        const chip = element('span', `↑ #${dependency.number}${state ? ` · ${state}` : ''}`, 'dependency-chip');
-        chip.title = state === 'merged' ? 'Parent PR has already merged; it is no longer an active dependency'
-          : state === 'closed' ? 'Parent PR was closed without merging'
-          : node.externalParent ? 'Parent PR is outside this group’s loaded open results' : 'Parent PR is beyond the four visible lanes';
-        meta.append(chip);
-      } else if (node.unloadedBase) {
-        const chip = element('span', '↑ base not loaded', 'dependency-chip');
-        chip.title = `Base branch: ${pr.baseBranch}. Its parent PR could not be identified in the loaded results or GitHub lookup.`;
-        meta.append(chip);
-      }
-      if (pr.branch) {
-        const branch = element('button', undefined, 'branch-copy');
-        branch.type = 'button';
-        branch.title = `Copy branch name: ${pr.branch}`;
-        branch.setAttribute('aria-label', branch.title);
-        const symbol = element('span', undefined, 'branch-copy-symbol');
-        symbol.setAttribute('aria-hidden', 'true'); symbol.append(icon('copy', 14));
-        branch.append(element('span', pr.branch, 'branch-name'), symbol);
-        clipboardFeedback(branch, { text: pr.branch, symbol, feedback, success: 'Branch name copied' });
-        meta.append(branch);
-      }
-      if (pr.review !== 'NONE') {
-        const review = { APPROVED: 'Approved', CHANGES_REQUESTED: 'Changes requested', REVIEW_REQUIRED: 'Review required', REVIEW_BYPASS_AVAILABLE: 'Review bypass available' };
-        const reviewBadge = badge(review[pr.review] ?? pr.review, pr.review);
-        if (pr.review === 'REVIEW_BYPASS_AVAILABLE') reviewBadge.title = 'GitHub requires reviews for this branch, but your account can bypass branch protections.';
-        meta.append(reviewBadge);
-      }
+      // Structural gutter changes must not detach a protected editor/popover.
+      // Its dependency labels catch up when protection ends and the row rebuilds.
+      const gutter = cached.entry.querySelector('.dependency-gutter');
+      if (graph.gutter && !gutter) {
+        const spacer = element('div', undefined, 'dependency-gutter');
+        spacer.setAttribute('aria-hidden', 'true'); cached.entry.prepend(spacer);
+      } else if (!graph.gutter) gutter?.remove();
+      if (cached.entry !== nextRow) rowsChanged = true;
+      place(list, cached.entry, nextRow);
+      nextRow = cached.entry.nextElementSibling;
+      // Relative ages can change without rebuilding the row or its controls.
+      const time = cached.entry.querySelector('time');
       const age = relativeTime(pr.updatedAt);
-      const time = element('time', undefined, 'updated-time');
-      time.dateTime = pr.updatedAt;
-      time.title = `Updated ${new Date(pr.updatedAt).toLocaleString()}`;
+      time.lastChild.textContent = age;
       time.setAttribute('aria-label', `Updated ${age}`);
-      time.append(icon('clock', 14), document.createTextNode(age));
-      const diffCounts = element('span', undefined, 'diff-counts');
-      diffCounts.title = `${pr.additions} additions, ${pr.deletions} deletions`;
-      diffCounts.setAttribute('aria-label', diffCounts.title);
-      diffCounts.append(element('span', String(pr.additions), 'additions success'), element('span', String(pr.deletions), 'deletions failure'));
-      meta.append(time, diffCounts);
-      if (Number.isInteger(pr.commentCount) && pr.commentCount >= 0) {
-        const comments = element('span', undefined, 'comment-count');
-        comments.title = `${pr.commentCount} ${pr.commentCount === 1 ? 'comment' : 'comments'}`;
-        comments.setAttribute('aria-label', comments.title);
-        comments.append(icon('comment', 14), document.createTextNode(String(pr.commentCount)));
-        meta.append(comments);
-      }
-      const issues = issuePopover.button(pr);
-      if (issues) meta.append(issues);
-      for (const label of pr.labels) meta.append(badge(label, 'label'));
-      const content = element('div', undefined, 'pr-content');
-      content.append(line);
-      if (merges.get(pr.id)?.error) {
-        const error = element('p', merges.get(pr.id).error, 'draft-error error-message');
-        error.setAttribute('role', 'alert'); content.append(error);
-      }
-      if (draftChanges.get(pr.id)?.error) {
-        const error = element('p', draftChanges.get(pr.id).error, 'draft-error error-message');
-        error.setAttribute('role', 'alert'); content.append(error);
-      }
-      if (titleEdits.has(pr.id) && pr.author.toLowerCase() === viewerLogin.toLowerCase()) content.append(titleEditor(pr));
-      content.append(meta, feedback);
-      const reviewers = element('div', undefined, 'reviewers');
-      reviewers.setAttribute('role', 'group');
-      reviewers.setAttribute('aria-label', 'Reviewers');
-      const reviewStates = {
-        REQUESTED: ['Awaiting review', 'review_required', '◷'],
-        APPROVED: ['Approved', 'approved', '✓'],
-        CHANGES_REQUESTED: ['Changes requested', 'changes_requested', '!'],
-        COMMENTED: ['Commented', 'commented', '⋯'],
-        DISMISSED: ['Review dismissed', 'dismissed', '−'],
-      };
-      for (const reviewer of pr.reviewers ?? []) {
-        const [description, kind, symbol] = reviewStates[reviewer.state] ?? [reviewer.state, 'none', '·'];
-        const person = element('span', undefined, 'reviewer');
-        person.title = `${reviewer.name}: ${description}`;
-        person.setAttribute('aria-label', `${reviewer.name}: ${description}`);
-        const status = badge(symbol, kind);
-        status.classList.add('review-status');
-        status.setAttribute('aria-hidden', 'true');
-        person.append(usernameBadge(reviewer.name), status);
-        reviewers.append(person);
-      }
-      if (pr.reviewersTruncated && title.hasAttribute('href')) {
-        const all = element('a', 'View all on GitHub');
-        all.href = title.href; all.target = '_blank'; all.rel = 'noopener noreferrer';
-        all.dataset.viewPr = '';
-        reviewers.append(all);
-      }
-      row.append(content);
-      if (pr.reviewers?.length || pr.reviewersTruncated) row.append(reviewers);
-      entry.append(row);
-      target.append(entry);
-    };
-    for (const node of graph.rows) renderDependency(node, list);
-    section.append(list); fragment.append(section);
+    }
+    const graphKey = JSON.stringify([graph.gutter, graph.rows.map(n =>
+      [n.pr.id, n.lane, n.parentIndex, n.nodeStatus, n.externalParent, n.unloadedBase])]);
+    if (rowsChanged || group.graphKey !== graphKey) {
+      group.clear();
+      group.clear = graph.gutter ? drawDependencies([{ list, graph }]) : () => {};
+      group.graphKey = graphKey;
+    }
   }
-  if (!count && !loading) fragment.append(element('p', 'No pull requests found for this query.', 'empty'));
-  $('results').replaceChildren(fragment);
-  clearDependencyDrawings = drawDependencies(laneGroups);
-  $('results').setAttribute('aria-busy', String(loading));
+  for (const [id, cached] of rowCache) if (!activeRows.has(id)) {
+    cached.entry.remove(); rowCache.delete(id);
+  }
+  for (const [key, group] of groupCache) if (!activeGroups.has(key)) {
+    group.clear(); group.section.remove(); groupCache.delete(key);
+  }
+  if (issuePopover.isOpen && !activeRows.has(issuePopover.pullId)) issuePopover.close();
+  results.querySelector('.empty')?.remove();
+  if (!count && !loading) results.append(element('p', 'No pull requests found for this query.', 'empty'));
+  results.setAttribute('aria-busy', String(loading));
   $('more').hidden = !more; $('more').disabled = loading;
   updateRefreshButton();
 }
@@ -684,6 +568,7 @@ async function load({ append = false, refresh = false, background = false } = {}
     data.items = fetchedItems;
     if (!loads.isCurrent(request)) return;
     if (viewedStore.selectAccount(data.viewer)) {
+      issuePopover.close();
       mergedStore.clear();
       titleEdits.clear();
       draftChanges.clear();
@@ -692,11 +577,21 @@ async function load({ append = false, refresh = false, background = false } = {}
     polling.succeeded('list', pollRevision);
     // Preserve confirmed mutations if search indexing briefly returns an older version.
     if (background) {
-      if (editingPull()) { polling.invalidate(); return; }
       const previous = new Map(items.map(pr => [pr.id, pr]));
       data.items = data.items.map(pr => Date.parse(previous.get(pr.id)?.updatedAt) > Date.parse(pr.updatedAt) ? previous.get(pr.id) : pr);
     }
-    data.items = data.items.map(pr => mergedStore.reconcile(pr));
+    // Preserve only active rows; unrelated PRs can continue refreshing.
+    const protectedItems = new Map(items.filter(pr => protectedPull(pr.id)).map(pr => [pr.id, pr]));
+    data.items = data.items.map(pr => protectedItems.get(pr.id) ?? mergedStore.reconcile(pr));
+    let retainedMissing = 0;
+    for (const [index, pr] of items.entries()) {
+      if (protectedItems.has(pr.id) && !data.items.some(item => item.id === pr.id)) {
+        data.items.splice(Math.min(index, data.items.length), 0, pr);
+        retainedMissing++;
+      }
+    }
+    // These rows remain visible locally until protection ends and we refetch.
+    if (!append) data.total += retainedMissing;
     const excluded = new Set(data.items.filter(pr => !matchesQueryState(pr, appliedQuery)).map(pr => pr.id));
     data.items = data.items.filter(pr => !excluded.has(pr.id));
     data.total = Math.max(0, data.total - excluded.size);
@@ -723,8 +618,7 @@ async function load({ append = false, refresh = false, background = false } = {}
   } finally {
     if (loads.isCurrent(request)) {
       loading = false;
-      if (!background || !editingPull()) render();
-      else updateRefreshButton();
+      render();
       scheduleMergeReadiness();
     }
   }
