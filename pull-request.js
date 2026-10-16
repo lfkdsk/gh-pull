@@ -13,7 +13,7 @@ export function mergeOptions(pr, viewerLogin) {
     !pr.mergeQueue && !pr.stackEntry && ['WRITE', 'MAINTAIN', 'ADMIN'].includes(repo.viewerPermission) && methods.length &&
     (pr.mergeable === 'UNKNOWN' || pr.mergeStateStatus === 'UNKNOWN'));
   const hasConflicts = pr.state === 'OPEN' && (pr.mergeable === 'CONFLICTING' || pr.mergeStateStatus === 'DIRTY');
-  return { canMerge, mergePending, hasConflicts, headOid: pr.headRefOid, mergeMethod: methods.includes(repo.viewerDefaultMergeMethod) ? repo.viewerDefaultMergeMethod : methods[0] };
+  return { canMerge, mergePending, hasConflicts, mergeMethods: methods, headOid: pr.headRefOid, mergeMethod: methods.includes(repo.viewerDefaultMergeMethod) ? repo.viewerDefaultMergeMethod : methods[0] };
 }
 
 function checkCountsFor(pr) {

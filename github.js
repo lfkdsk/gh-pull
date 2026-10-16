@@ -181,7 +181,7 @@ export function createGitHub(options = {}) {
     const readiness = mergeOptions(pr, viewer);
     if (!readiness.canMerge) throw new ApiError('This PR is no longer ready to merge. Refresh to see its current status.', 409);
     if (pr.headRefOid !== headOid) throw new ApiError('New commits were pushed. Refresh and review the changes before merging.', 409);
-    if (readiness.mergeMethod !== mergeMethod) throw new ApiError('The preferred merge method changed. Refresh before merging.', 409);
+    if (!readiness.mergeMethods.includes(mergeMethod)) throw new ApiError('This merge method is no longer enabled for the repository. Refresh and choose another method.', 409);
     if (getMergeAccess) {
       const access = (await getMergeAccess([pr.repository.nameWithOwner])).get(pr.repository.nameWithOwner);
       if (!access?.allowed) throw new ApiError(access?.message || 'Could not verify app access. Refresh to try again.', 403);

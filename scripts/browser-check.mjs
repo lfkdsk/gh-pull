@@ -11,7 +11,7 @@ async function fixture(t, overrides = {}) {
     createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T01:00:00Z',
     additions: 520, deletions: 148, changedFiles: 8, commentCount: 12, review: 'NONE',
     checks: 'SUCCESS', reviewers: [], labels: [], canMerge: true,
-    headOid: 'a'.repeat(40), mergeMethod: 'SQUASH',
+    headOid: 'a'.repeat(40), mergeMethod: 'SQUASH', mergeMethods: ['MERGE', 'SQUASH', 'REBASE'],
     ...overrides,
   };
   let reject = false, hour = 1, hold, release;
@@ -32,7 +32,7 @@ async function fixture(t, overrides = {}) {
     updateTitle: async ({ title }) => update({ title }),
     convertToDraft: async () => update({ status: 'DRAFT', canMerge: false }),
     markReadyForReview: async () => update({ status: 'OPEN', canMerge: true }),
-    merge: async () => update({ status: 'MERGED', canMerge: false }),
+    merge: async ({ mergeMethod }) => update({ status: 'MERGED', canMerge: false, mergeMethod }),
   });
   t.after(() => release?.());
   await page.addInitScript(() => {
@@ -184,5 +184,56 @@ test('successful manual refresh clears a stale merge error', async t => {
   await f.page.getByText('Fixture rejected this change', { exact: true }).waitFor();
   await f.refresh();
   await f.page.getByText('Fixture rejected this change', { exact: true }).waitFor({ state: 'hidden' });
+  assert.deepEqual(f.errors, []);
+});
+
+test('merge choices follow live repository options and preserve a valid selection across refresh', async t => {
+  const f = await fixture(t);
+  await f.open();
+  const select = f.page.getByRole('combobox', { name: 'Merge method for example/dashboard #1' });
+  assert.equal(await select.inputValue(), 'SQUASH');
+  await select.focus();
+  await select.press('ArrowDown');
+  assert.equal(await select.inputValue(), 'REBASE');
+  await select.press('Enter');
+  await select.press('Escape');
+  await f.page.mouse.move(0, 0);
+  const border = await select.evaluate(e => {
+    const style = getComputedStyle(e.closest('.merge-split'));
+    return { width: style.borderTopWidth, shadow: style.boxShadow, outline: style.outlineStyle };
+  });
+  assert.deepEqual(border, { width: '1px', shadow: 'none', outline: 'none' }, 'selection keeps a single thin border even while focused');
+  assert.equal(await f.page.locator('.merge-action').textContent(), 'Rebase and merge');
+  await f.refresh();
+  assert.equal(await select.inputValue(), 'REBASE');
+  f.laterUpdate({ mergeMethods: ['MERGE', 'SQUASH'] });
+  await f.refresh();
+  assert.deepEqual(await select.locator('option').evaluateAll(options => options.map(o => o.value)), ['MERGE', 'SQUASH']);
+  assert.equal(await select.inputValue(), 'SQUASH');
+  await select.selectOption('MERGE');
+  const request = f.page.waitForRequest(r => r.url().endsWith('/api/pulls/merge') && r.method() === 'PATCH');
+  await f.page.locator('.merge-action').click();
+  assert.equal((await request).postDataJSON().mergeMethod, 'MERGE');
+  await f.page.waitForFunction(() => document.querySelector('.pr-row')?.textContent.includes('Merged'));
+  assert.equal(await select.count(), 0);
+  assert.deepEqual(f.errors, []);
+});
+
+test('single-method repositories need no selector and merge controls fit on mobile', async t => {
+  const f = await fixture(t, { mergeMethods: ['SQUASH'] });
+  await f.open();
+  assert.equal(await f.page.locator('.merge-method').count(), 0);
+  f.laterUpdate({ mergeMethods: ['MERGE', 'SQUASH', 'REBASE'] });
+  await f.refresh();
+  for (const colorScheme of ['light', 'dark']) {
+    await f.page.emulateMedia({ colorScheme });
+    await f.page.setViewportSize({ width: 375, height: 900 });
+    assert.equal(await f.page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+    const button = await f.page.locator('.merge-action').boundingBox();
+    const arrow = await f.page.locator('.merge-method').boundingBox();
+    assert.ok(Math.abs(button.x + button.width - arrow.x) <= 1, 'arrow joins the merge button');
+    assert.ok(Math.abs(button.height - arrow.height) <= 1, 'both halves have matching heights');
+    await f.page.screenshot({ path: `/tmp/gh-pull-merge-method-${colorScheme}.png`, fullPage: true });
+  }
   assert.deepEqual(f.errors, []);
 });

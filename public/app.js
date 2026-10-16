@@ -14,6 +14,7 @@ if (!queryError(appliedQuery)) appliedQuery = normalizeQuery(appliedQuery);
 let items = [], total = 0, cursor = null, more = false, limited = false, loading = false;
 const loads = createLatestRequest();
 const mergedStore = createMergedStore();
+const mergeSelections = new Map();
 const polling = createPollingSchedule();
 const issuePopover = createIssuePopover();
 let statusLoading = false, statusController, statusOffset = 0, loadedPages = 1;
@@ -58,7 +59,7 @@ async function apiFetch(url, options) {
   const response = await fetch(url, options);
   if (response.status === 401 && authMode === 'github-app') {
     authenticated = false;
-    items = []; titleEdits.clear(); draftChanges.clear(); merges.clear();
+    items = []; titleEdits.clear(); draftChanges.clear(); merges.clear(); mergeSelections.clear();
     $('results').replaceChildren();
     $('dashboard').hidden = true;
     location.replace('/?auth_error=expired');
@@ -213,13 +214,42 @@ function createMergeAction(pr, prUrl) {
   }
   if (!pr.canMerge) return null;
   const actions = document.createDocumentFragment();
-  const method = { MERGE: 'Merge', SQUASH: 'Squash and merge', REBASE: 'Rebase and merge' }[pr.mergeMethod];
+  const labels = { MERGE: 'Merge', SQUASH: 'Squash and merge', REBASE: 'Rebase and merge' };
+  const methods = (pr.mergeMethods ?? [pr.mergeMethod]).filter(method => labels[method]);
+  if (!methods.length) return null;
+  if (!methods.includes(mergeSelections.get(pr.id))) mergeSelections.delete(pr.id);
+  let selected = mergeSelections.get(pr.id) ?? (methods.includes(pr.mergeMethod) ? pr.mergeMethod : methods[0]);
+  const method = labels[selected];
   const merge = element('button', merges.get(pr.id)?.saving ? 'Merging…' : method, 'badge open merge-action');
   merge.type = 'button';
   merge.setAttribute('aria-label', `${method} ${pr.repo} #${pr.number}`);
   const blockedAccess = authMode === 'github-app' && !pr.mergeAccess?.allowed;
   merge.disabled = blockedAccess || Boolean(merges.get(pr.id)?.saving || draftChanges.get(pr.id)?.saving || titleEdits.has(pr.id));
-  merge.addEventListener('click', () => mergePull(pr));
+  merge.addEventListener('click', () => mergePull(pr, selected));
+  const controls = element('span', undefined, 'merge-controls');
+  controls.append(merge);
+  if (methods.length > 1) {
+    controls.classList.add('merge-split');
+    const chooser = element('span', undefined, 'merge-method-trigger open');
+    const select = element('select', undefined, 'merge-method');
+    select.setAttribute('aria-label', `Merge method for ${pr.repo} #${pr.number}`);
+    select.title = 'Merge method';
+    for (const value of methods) {
+      const option = element('option', { MERGE: 'Merge commit', SQUASH: 'Squash', REBASE: 'Rebase' }[value]);
+      option.value = value;
+      select.append(option);
+    }
+    select.value = selected;
+    select.disabled = merge.disabled;
+    select.addEventListener('change', () => {
+      selected = select.value;
+      mergeSelections.set(pr.id, selected);
+      merge.textContent = labels[selected];
+      merge.setAttribute('aria-label', `${labels[selected]} ${pr.repo} #${pr.number}`);
+    });
+    chooser.append(select);
+    controls.append(chooser);
+  }
   if (blockedAccess) {
     const message = pr.mergeAccess?.message || 'Could not verify app access. Refresh to try again.';
     const control = element('span', undefined, 'merge-access-blocked');
@@ -227,7 +257,7 @@ function createMergeAction(pr, prUrl) {
     control.title = message;
     control.tabIndex = 0;
     control.setAttribute('aria-label', `${method} unavailable. ${message}`);
-    control.append(merge); actions.append(control);
+    control.append(controls); actions.append(control);
     if (pr.mergeAccess?.url) {
       const install = element('a', pr.mergeAccess.action, 'merge-access-link');
       install.href = pr.mergeAccess.url;
@@ -235,7 +265,7 @@ function createMergeAction(pr, prUrl) {
       install.title = 'Complete setup on GitHub, then refresh this page. Organization access may require owner approval.';
       actions.append(install);
     }
-  } else actions.append(merge);
+  } else actions.append(controls);
   return actions;
 }
 
@@ -302,10 +332,10 @@ async function changePull(pr, changes, { action, input = {}, apply, message, onS
   }
 }
 
-async function mergePull(pr) {
+async function mergePull(pr, mergeMethod) {
   if (authMode === 'github-app' && !pr.mergeAccess?.allowed) return;
   await changePull(pr, merges, {
-    action: 'merge', input: { headOid: pr.headOid, mergeMethod: pr.mergeMethod },
+    action: 'merge', input: { headOid: pr.headOid, mergeMethod },
     message: `Merged ${pr.repo} #${pr.number}`,
     apply(current, data) {
       if (!current) return;
@@ -648,7 +678,7 @@ async function load({ append = false, refresh = false, background = false } = {}
       mergedStore.clear();
       titleEdits.clear();
       draftChanges.clear();
-      merges.clear();
+      merges.clear(); mergeSelections.clear();
     }
     polling.succeeded('list', pollRevision);
     // Preserve confirmed mutations if search indexing briefly returns an older version.
