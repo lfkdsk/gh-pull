@@ -37,7 +37,7 @@ export function drawDependencies(groups) {
             : `M${px} ${py} H${cx - 8} Q${cx} ${py} ${cx} ${py + 8} V${cy - 5}`;
           canvas.path(path).fill('none').stroke(stroke).addClass('dependency-edge');
           arrow(cx, py + (node.lane === parent.lane ? 7 : 12));
-        } else if (node.externalParent) {
+        } else if (node.externalParent || node.unloadedBase) {
           canvas.path(`M${cx} ${cy - 16} V${cy - 5}`).fill('none')
             .stroke({ ...stroke, dasharray: '3 2' }).addClass('dependency-external');
           arrow(cx, cy - 22);

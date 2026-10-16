@@ -154,7 +154,7 @@ export function dependencyLanes(items, options) {
   const busy = [], hasFirstChild = new Set();
   rows.forEach((node, i) => {
     if (node.parentIndex < 0) {
-      if (node.children.length || node.externalParent) node.lane = 0;
+      if (node.children.length || node.externalParent || node.unloadedBase) node.lane = 0;
       return;
     }
     const parent = rows[node.parentIndex];

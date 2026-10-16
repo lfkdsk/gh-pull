@@ -132,8 +132,12 @@ test('non-default base without an identifiable PR shows base not loaded until re
   assert.equal(await chip.innerText(), '↑ base not loaded');
   assert.match(await chip.getAttribute('title'), /merge-train\/spartan/);
   assert.equal(await page.locator('.dependency-edge').count(), 0);
+  assert.equal(await page.locator('.dependency-external').count(), 1);
+  assert.equal(await page.locator('.dependency-dot').count(), 1);
+  assert.equal(await page.locator('.dependency-connector').getAttribute('width'), '32');
   baseBranch = 'next';
   await page.locator('#refresh').click();
   await chip.waitFor({ state: 'detached' });
+  assert.equal(await page.locator('.dependency-connector').count(), 0);
   assert.deepEqual(errors, []);
 });
