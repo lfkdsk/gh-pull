@@ -780,6 +780,11 @@ document.addEventListener('visibilitychange', syncActivity);
 window.addEventListener('online', syncActivity);
 window.addEventListener('offline', syncActivity);
 window.addEventListener('focus', poll);
+// Returning from a mouse-opened tab should not leave the link focused.
+// Keyboard activation (detail === 0) keeps focus for continued navigation.
+document.addEventListener('click', event => {
+  if (event.detail > 0) event.target.closest('a[target="_blank"]')?.blur();
+});
 window.addEventListener('pagehide', () => { events?.close(); events = null; });
 window.addEventListener('pageshow', syncActivity);
 
