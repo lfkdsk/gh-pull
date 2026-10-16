@@ -772,6 +772,10 @@ input:focus, select:focus, textarea:focus {
   max-width: 100%;
 }
 
+.merge-split {
+  border-radius: var(--radius-small);
+}
+
 .merge-split > .merge-action {
   border-top-right-radius: 0;
   border-bottom-right-radius: 0;
@@ -810,9 +814,18 @@ input:focus, select:focus, textarea:focus {
   cursor: pointer;
 }
 
-.merge-method-trigger:focus-within,
-.merge-method-trigger:hover:has(select:not(:disabled)) {
-  outline: 1px solid currentColor;
+.merge-split > .merge-action:hover:not(:disabled),
+.merge-split > .merge-action:focus-visible {
+  outline: none;
+}
+
+.merge-split:has(.merge-action:hover:not(:disabled)),
+.merge-split:has(.merge-method:hover:not(:disabled)) {
+  outline: 1px solid var(--color-success-text);
+}
+
+.merge-split:focus-within {
+  outline: 2px solid var(--color-success-text);
   outline-offset: 1px;
 }
 
