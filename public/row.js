@@ -1,203 +1,87 @@
-import { element, icon, clipboardFeedback } from './ui.js';
-import { labels, relativeTime } from './model.js';
+import { html, nothing, repeat } from './vendor/lit-html.js';
+import { labels, relativeTime, NAME_COLOR_COUNT } from './model.js';
+import { iconTemplate as icon, badge, githubUrl, usernameLink, repositoryLink, copyFeedback } from './templates.js';
 
-export function renderRow(node, gutter, ctx) {
-  const { viewedStore, markViewed, viewerLogin, draftChanges, merges, titleEdits, changeDraftStatus, badge, usernameBadge, repositoryLink, render, focusTitleControl, createMergeAction, issuePopover, titleEditor } = ctx;
-  const { pr } = node;
-  const entry = element('li', undefined, 'dependency-node');
-  if (gutter) {
-    const gutter = element('div', undefined, 'dependency-gutter');
-    gutter.setAttribute('aria-hidden', 'true');
-    entry.append(gutter);
-  }
-  const row = element('div', undefined, 'pr-row');
-  row.dataset.prId = pr.id;
-  const hasUpdates = viewedStore.hasUpdates(pr);
-  row.classList.toggle('has-updates', hasUpdates);
-  const onOpen = event => {
-    if ((event.type === 'click' && event.button === 0) || (event.type === 'auxclick' && event.button === 1)) {
-      if (event.target.closest('a[data-view-pr][href]')) markViewed(pr);
-    }
-  };
-  row.addEventListener('click', onOpen);
-  row.addEventListener('auxclick', onOpen);
-  const title = element('a', pr.title, 'pr-title');
-  // Only navigate to GitHub, even if an upstream response is malformed.
-  try { const url = new URL(pr.url); if (url.protocol === 'https:' && url.hostname === 'github.com') title.href = url.href; } catch { /* No unsafe link. */ }
-  title.target = '_blank'; title.rel = 'noopener noreferrer';
-  title.dataset.viewPr = '';
-  title.setAttribute('aria-label', `${hasUpdates ? 'New updates: ' : ''}${pr.title} (opens in a new tab)`);
-  const line = element('div', undefined, 'title-line');
-  if (node.parent) {
-    const relation = element('span', `Merges into #${node.parent.pr.number}: ${node.parent.pr.title}`, 'sr-only');
-    line.append(relation);
-  }
-  const feedback = element('span', undefined, 'sr-only');
-  feedback.setAttribute('role', 'status');
-  if (['OPEN', 'DRAFT'].includes(pr.status) && pr.author.toLowerCase() === viewerLogin.toLowerCase()) {
-    const pending = draftChanges.get(pr.id)?.saving ?? false;
-    const status = element('button', pending ? 'Updating…' : labels[pr.status], `badge ${pr.status.toLowerCase()} draft-action`);
-    status.type = 'button'; status.disabled = pending || Boolean(merges.get(pr.id)?.saving);
-    status.title = pr.status === 'OPEN' ? 'Convert to draft' : 'Mark ready for review';
-    status.setAttribute('aria-label', pr.status === 'OPEN' ? `Convert ${pr.title} to draft` : `Mark ${pr.title} ready for review`);
-    status.addEventListener('click', () => changeDraftStatus(pr));
-    line.append(status);
-  } else line.append(badge(labels[pr.status], pr.status));
-  if (title.hasAttribute('href')) {
-    const copy = element('button', undefined, 'copy-link icon-button');
-    copy.type = 'button';
-    copy.title = 'Copy PR link';
-    copy.setAttribute('aria-label', `Copy link to ${pr.title}`);
-    copy.append(icon('copy'));
-    clipboardFeedback(copy, { text: title.href, feedback, success: 'PR link copied' });
-    const actions = element('span', undefined, 'pr-links');
-    actions.append(copy);
-    const files = element('a', undefined, 'pr-files icon-button');
-    const url = new URL(title.href);
-    url.pathname = `${url.pathname.replace(/\/$/, '')}/files`;
-    url.search = ''; url.hash = '';
-    files.href = url.href;
-    files.target = '_blank'; files.rel = 'noopener noreferrer';
-    files.dataset.viewPr = '';
-    files.title = 'View code changes (opens in a new tab)';
-    files.setAttribute('aria-label', `View code changes for ${pr.title} (opens in a new tab)`);
-    files.append(icon('files'));
-    if (Number.isInteger(pr.changedFiles) && pr.changedFiles >= 0) {
-      files.append(element('span', String(pr.changedFiles), 'file-count'));
-      files.setAttribute('aria-label', `View code changes for ${pr.title}, ${pr.changedFiles} ${pr.changedFiles === 1 ? 'file' : 'files'} changed (opens in a new tab)`);
-    }
-    actions.append(files);
-    line.append(actions);
-  }
-  line.append(title);
-  if (pr.author.toLowerCase() === viewerLogin.toLowerCase()) {
-    const edit = element('button', undefined, 'edit-title icon-button');
-    edit.type = 'button'; edit.title = 'Edit PR title';
-    edit.setAttribute('aria-label', `Edit title of ${pr.title}`);
-    edit.disabled = Boolean(titleEdits.get(pr.id)?.saving || merges.get(pr.id)?.saving);
-    edit.append(icon('edit'));
-    edit.addEventListener('click', () => {
-      if (!titleEdits.has(pr.id)) titleEdits.set(pr.id, { value: pr.title, expectedTitle: pr.title, saving: false, error: '' });
-      render(); focusTitleControl(pr.id, '.title-editor input');
-    });
-    line.append(edit);
-  }
-  const mergeAction = createMergeAction(pr, title.getAttribute('href'));
-  if (mergeAction) line.append(mergeAction);
-  const meta = element('div', undefined, 'meta');
-  let checks = badge(labels[pr.checks] ?? pr.checks, pr.checks);
-  if (pr.checks === 'PENDING' && pr.checkCounts?.total > 0) {
-    checks.textContent += ` · ${pr.checkCounts.passed}/${pr.checkCounts.total}`;
-    checks.title = `${pr.checkCounts.passed} passed of ${pr.checkCounts.total} checks`;
-    checks.setAttribute('aria-label', `Checks pending: ${checks.title}`);
-  }
-  if (pr.checks === 'FAILURE' && title.hasAttribute('href')) {
-    checks = element('a', labels[pr.checks], 'badge failure');
-    const url = new URL(title.href);
-    url.pathname = `${url.pathname.replace(/\/$/, '')}/checks`;
-    url.search = ''; url.hash = '';
-    checks.href = url.href;
-    checks.target = '_blank'; checks.rel = 'noopener noreferrer';
-    checks.dataset.viewPr = '';
-    checks.title = 'View checks (opens in a new tab)';
-    checks.setAttribute('aria-label', `Checks failed: view checks for ${pr.title} (opens in a new tab)`);
-  }
-  const author = usernameBadge(pr.author);
-  const repo = element('span', undefined, 'badge');
-  repo.append(repositoryLink(pr.repo), document.createTextNode(` #${pr.number}`));
-  meta.append(repo, author, checks);
-  const dependency = node.mergedParent ?? node.externalParent ?? (node.lane > 3 ? node.parent?.pr : null);
-  if (dependency) {
-    const state = dependency.status === 'MERGED' ? 'merged' : dependency.status === 'CLOSED' ? 'closed' : node.externalParent ? 'not loaded' : '';
-    const chip = element('span', `↑ #${dependency.number}${state ? ` · ${state}` : ''}`, 'dependency-chip');
-    chip.title = state === 'merged' ? 'Parent PR has already merged; it is no longer an active dependency'
+const reviewLabels = { APPROVED: 'Approved', CHANGES_REQUESTED: 'Changes requested', REVIEW_REQUIRED: 'Review required', REVIEW_BYPASS_AVAILABLE: 'Review bypass available' };
+const reviewStates = {
+  REQUESTED: ['Awaiting review', 'review_required', '◷'], APPROVED: ['Approved', 'approved', '✓'],
+  CHANGES_REQUESTED: ['Changes requested', 'changes_requested', '!'], COMMENTED: ['Commented', 'commented', '⋯'], DISMISSED: ['Review dismissed', 'dismissed', '−'],
+};
+function dependency(node) {
+  const pr = node.mergedParent ?? node.externalParent ?? (node.lane > 3 ? node.parent?.pr : null);
+  if (pr) {
+    const state = pr.status === 'MERGED' ? 'merged' : pr.status === 'CLOSED' ? 'closed' : node.externalParent ? 'not loaded' : '';
+    const title = state === 'merged' ? 'Parent PR has already merged; it is no longer an active dependency'
       : state === 'closed' ? 'Parent PR was closed without merging'
       : node.externalParent ? 'Parent PR is outside this group’s loaded open results' : 'Parent PR is beyond the four visible lanes';
-    meta.append(chip);
-  } else if (node.unloadedBase) {
-    const chip = element('span', '↑ base not loaded', 'dependency-chip');
-    chip.title = `Base branch: ${pr.baseBranch}. Its parent PR could not be identified in the loaded results or GitHub lookup.`;
-    meta.append(chip);
+    return html`<span class="dependency-chip" title=${title}>↑ #${pr.number}${state ? ` · ${state}` : ''}</span>`;
   }
-  if (pr.branch) {
-    const branch = element('button', undefined, 'branch-copy');
-    branch.type = 'button';
-    branch.title = `Copy branch name: ${pr.branch}`;
-    branch.setAttribute('aria-label', branch.title);
-    const symbol = element('span', undefined, 'branch-copy-symbol');
-    symbol.setAttribute('aria-hidden', 'true'); symbol.append(icon('copy', 14));
-    branch.append(element('span', pr.branch, 'branch-name'), symbol);
-    clipboardFeedback(branch, { text: pr.branch, symbol, feedback, success: 'Branch name copied' });
-    meta.append(branch);
-  }
-  if (pr.review !== 'NONE') {
-    const review = { APPROVED: 'Approved', CHANGES_REQUESTED: 'Changes requested', REVIEW_REQUIRED: 'Review required', REVIEW_BYPASS_AVAILABLE: 'Review bypass available' };
-    const reviewBadge = badge(review[pr.review] ?? pr.review, pr.review);
-    if (pr.review === 'REVIEW_BYPASS_AVAILABLE') reviewBadge.title = 'GitHub requires reviews for this branch, but your account can bypass branch protections.';
-    meta.append(reviewBadge);
-  }
-  const age = relativeTime(pr.updatedAt);
-  const time = element('time', undefined, 'updated-time');
-  time.dateTime = pr.updatedAt;
-  time.title = `Updated ${new Date(pr.updatedAt).toLocaleString()}`;
-  time.setAttribute('aria-label', `Updated ${age}`);
-  time.append(icon('clock', 14), document.createTextNode(age));
-  const diffCounts = element('span', undefined, 'diff-counts');
-  diffCounts.title = `${pr.additions} additions, ${pr.deletions} deletions`;
-  diffCounts.setAttribute('aria-label', diffCounts.title);
-  diffCounts.append(element('span', String(pr.additions), 'additions success'), element('span', String(pr.deletions), 'deletions failure'));
-  meta.append(time, diffCounts);
-  if (Number.isInteger(pr.commentCount) && pr.commentCount >= 0) {
-    const comments = element('span', undefined, 'comment-count');
-    comments.title = `${pr.commentCount} ${pr.commentCount === 1 ? 'comment' : 'comments'}`;
-    comments.setAttribute('aria-label', comments.title);
-    comments.append(icon('comment', 14), document.createTextNode(String(pr.commentCount)));
-    meta.append(comments);
-  }
-  const issues = issuePopover.button(pr);
-  if (issues) meta.append(issues);
-  for (const label of pr.labels) meta.append(badge(label, 'label'));
-  const content = element('div', undefined, 'pr-content');
-  content.append(line);
-  if (merges.get(pr.id)?.error) {
-    const error = element('p', merges.get(pr.id).error, 'draft-error error-message');
-    error.setAttribute('role', 'alert'); content.append(error);
-  }
-  if (draftChanges.get(pr.id)?.error) {
-    const error = element('p', draftChanges.get(pr.id).error, 'draft-error error-message');
-    error.setAttribute('role', 'alert'); content.append(error);
-  }
-  if (titleEdits.has(pr.id) && pr.author.toLowerCase() === viewerLogin.toLowerCase()) content.append(titleEditor(pr));
-  content.append(meta, feedback);
-  const reviewers = element('div', undefined, 'reviewers');
-  reviewers.setAttribute('role', 'group');
-  reviewers.setAttribute('aria-label', 'Reviewers');
-  const reviewStates = {
-    REQUESTED: ['Awaiting review', 'review_required', '◷'],
-    APPROVED: ['Approved', 'approved', '✓'],
-    CHANGES_REQUESTED: ['Changes requested', 'changes_requested', '!'],
-    COMMENTED: ['Commented', 'commented', '⋯'],
-    DISMISSED: ['Review dismissed', 'dismissed', '−'],
+  return node.unloadedBase ? html`<span class="dependency-chip" title=${`Base branch: ${node.pr.baseBranch}. Its parent PR could not be identified in the loaded results or GitHub lookup.`}>↑ base not loaded</span>` : nothing;
+}
+function checks(pr) {
+  if (pr.checks === 'FAILURE' && githubUrl(pr.url) !== nothing) return html`<a class="badge failure" href=${githubUrl(pr.url, 'checks')}
+    target="_blank" rel="noopener noreferrer" data-view-pr title="View checks (opens in a new tab)"
+    aria-label=${`Checks failed: view checks for ${pr.title} (opens in a new tab)`}>${labels[pr.checks]}</a>`;
+  const pending = pr.checks === 'PENDING' && pr.checkCounts?.total > 0;
+  const title = pending ? `${pr.checkCounts.passed} passed of ${pr.checkCounts.total} checks` : nothing;
+  return html`<span class=${`badge ${pr.checks.toLowerCase()}`} title=${title} aria-label=${pending ? `Checks pending: ${title}` : nothing}>${labels[pr.checks] ?? pr.checks}${pending ? ` · ${pr.checkCounts.passed}/${pr.checkCounts.total}` : ''}</span>`;
+}
+
+export function renderRow(node, gutter, ctx) {
+  const { pr } = node;
+  const { viewedStore, markViewed, viewerLogin, draftChanges, merges, titleEdits, changeDraftStatus,
+    render, focusTitleControl, createMergeAction, issuePopover, titleEditor, nameColors } = ctx;
+  const hasUpdates = viewedStore.hasUpdates(pr), own = pr.author.toLowerCase() === viewerLogin.toLowerCase();
+  const url = githubUrl(pr.url), hasUrl = url !== nothing;
+  const author = name => usernameLink(name, 'badge author', nameColors[name.toLowerCase()] * 360 / NAME_COLOR_COUNT);
+  const onOpen = event => {
+    if (((event.type === 'click' && event.button === 0) || (event.type === 'auxclick' && event.button === 1)) && event.target.closest('a[data-view-pr][href]')) markViewed(pr);
   };
-  for (const reviewer of pr.reviewers ?? []) {
-    const [description, kind, symbol] = reviewStates[reviewer.state] ?? [reviewer.state, 'none', '·'];
-    const person = element('span', undefined, 'reviewer');
-    person.title = `${reviewer.name}: ${description}`;
-    person.setAttribute('aria-label', `${reviewer.name}: ${description}`);
-    const status = badge(symbol, kind);
-    status.classList.add('review-status');
-    status.setAttribute('aria-hidden', 'true');
-    person.append(usernameBadge(reviewer.name), status);
-    reviewers.append(person);
-  }
-  if (pr.reviewersTruncated && title.hasAttribute('href')) {
-    const all = element('a', 'View all on GitHub');
-    all.href = title.href; all.target = '_blank'; all.rel = 'noopener noreferrer';
-    all.dataset.viewPr = '';
-    reviewers.append(all);
-  }
-  row.append(content);
-  if (pr.reviewers?.length || pr.reviewersTruncated) row.append(reviewers);
-  entry.append(row);
-  return entry;
+  const edit = () => {
+    if (!titleEdits.has(pr.id)) titleEdits.set(pr.id, { value: pr.title, expectedTitle: pr.title, saving: false, error: '' });
+    render(); focusTitleControl(pr.id, '.title-editor input');
+  };
+  const pending = draftChanges.get(pr.id)?.saving ?? false;
+  const filesKnown = Number.isInteger(pr.changedFiles) && pr.changedFiles >= 0;
+  const age = relativeTime(pr.updatedAt), diff = `${pr.additions} additions, ${pr.deletions} deletions`;
+  const commentTitle = `${pr.commentCount} ${pr.commentCount === 1 ? 'comment' : 'comments'}`;
+  return html`${gutter ? html`<div class="dependency-gutter" aria-hidden="true"></div>` : nothing}
+    <div class=${`pr-row${hasUpdates ? ' has-updates' : ''}`} data-pr-id=${pr.id} @click=${onOpen} @auxclick=${onOpen}>
+      <div class="pr-content"><div class="title-line">
+        ${node.parent ? html`<span class="sr-only">Merges into #${node.parent.pr.number}: ${node.parent.pr.title}</span>` : nothing}
+        ${own && ['OPEN', 'DRAFT'].includes(pr.status) ? html`<button type="button" class=${`badge ${pr.status.toLowerCase()} draft-action`}
+          ?disabled=${pending || Boolean(merges.get(pr.id)?.saving)} title=${pr.status === 'OPEN' ? 'Convert to draft' : 'Mark ready for review'}
+          aria-label=${pr.status === 'OPEN' ? `Convert ${pr.title} to draft` : `Mark ${pr.title} ready for review`}
+          @click=${() => changeDraftStatus(pr)}>${pending ? 'Updating…' : labels[pr.status]}</button>` : badge(labels[pr.status], pr.status)}
+        ${hasUrl ? html`<span class="pr-links">
+          <button class="copy-link icon-button" type="button" title="Copy PR link" aria-label=${`Copy link to ${pr.title}`} ${copyFeedback(url, 'PR link copied', 'Copy PR link')}><span class="copy-symbol">${icon('copy')}</span></button>
+          <a class="pr-files icon-button" href=${githubUrl(pr.url, 'files')} target="_blank" rel="noopener noreferrer" data-view-pr
+            title="View code changes (opens in a new tab)" aria-label=${`View code changes for ${pr.title}${filesKnown ? `, ${pr.changedFiles} ${pr.changedFiles === 1 ? 'file' : 'files'} changed` : ''} (opens in a new tab)`}>${icon('files')}${filesKnown ? html`<span class="file-count">${pr.changedFiles}</span>` : nothing}</a>
+        </span>` : nothing}
+        <a class="pr-title" href=${url} target="_blank" rel="noopener noreferrer" data-view-pr aria-label=${`${hasUpdates ? 'New updates: ' : ''}${pr.title} (opens in a new tab)`}>${pr.title}</a>
+        ${own ? html`<button class="edit-title icon-button" type="button" title="Edit PR title" aria-label=${`Edit title of ${pr.title}`}
+          ?disabled=${Boolean(titleEdits.get(pr.id)?.saving || merges.get(pr.id)?.saving)} @click=${edit}>${icon('edit')}</button>` : nothing}
+        ${createMergeAction(pr, hasUrl ? url : null)}
+      </div>
+      ${merges.get(pr.id)?.error ? html`<p class="draft-error error-message" role="alert">${merges.get(pr.id).error}</p>` : nothing}
+      ${draftChanges.get(pr.id)?.error ? html`<p class="draft-error error-message" role="alert">${draftChanges.get(pr.id).error}</p>` : nothing}
+      ${titleEdits.has(pr.id) && own ? titleEditor(pr) : nothing}
+      <div class="meta">
+        <span class="badge">${repositoryLink(pr.repo)} #${pr.number}</span>${author(pr.author)}${checks(pr)}${dependency(node)}
+        ${pr.branch ? html`<button class="branch-copy" type="button" title=${`Copy branch name: ${pr.branch}`} aria-label=${`Copy branch name: ${pr.branch}`}
+          ${copyFeedback(pr.branch, 'Branch name copied', `Copy branch name: ${pr.branch}`)}><span class="branch-name">${pr.branch}</span><span class="branch-copy-symbol copy-symbol" aria-hidden="true">${icon('copy', 14)}</span></button>` : nothing}
+        ${pr.review !== 'NONE' ? badge(reviewLabels[pr.review] ?? pr.review, pr.review, pr.review === 'REVIEW_BYPASS_AVAILABLE' ? 'GitHub requires reviews for this branch, but your account can bypass branch protections.' : nothing) : nothing}
+        <time class="updated-time" datetime=${pr.updatedAt} title=${`Updated ${new Date(pr.updatedAt).toLocaleString()}`} aria-label=${`Updated ${age}`}>${icon('clock', 14)}${age}</time>
+        <span class="diff-counts" title=${diff} aria-label=${diff}><span class="additions success">${pr.additions}</span><span class="deletions failure">${pr.deletions}</span></span>
+        ${Number.isInteger(pr.commentCount) && pr.commentCount >= 0 ? html`<span class="comment-count" title=${commentTitle} aria-label=${commentTitle}>${icon('comment', 14)}${pr.commentCount}</span>` : nothing}
+        ${issuePopover.button(pr)}${pr.labels.map(label => badge(label, 'label'))}
+      </div><span class="sr-only" role="status"></span></div>
+      ${pr.reviewers?.length || pr.reviewersTruncated ? html`<div class="reviewers" role="group" aria-label="Reviewers">
+        ${repeat(pr.reviewers ?? [], reviewer => reviewer.name, reviewer => {
+          const [description, kind, symbol] = reviewStates[reviewer.state] ?? [reviewer.state, 'none', '·'];
+          return html`<span class="reviewer" title=${`${reviewer.name}: ${description}`} aria-label=${`${reviewer.name}: ${description}`}>${author(reviewer.name)}<span class=${`badge ${kind} review-status`} aria-hidden="true">${symbol}</span></span>`;
+        })}
+        ${pr.reviewersTruncated && hasUrl ? html`<a href=${url} target="_blank" rel="noopener noreferrer" data-view-pr>View all on GitHub</a>` : nothing}
+      </div>` : nothing}
+    </div>`;
 }

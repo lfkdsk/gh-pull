@@ -27,7 +27,7 @@ async function collect(dir, prefix) {
   }
 }
 await collect(join(root, 'public'), 'public');
-const notices = ['LICENSE', 'THIRD_PARTY_NOTICES', 'public/fonts/Inter-LICENSE.txt', 'public/vendor/codemirror.LICENSE.txt', 'public/vendor/svg.LICENSE.txt',
+const notices = ['LICENSE', 'THIRD_PARTY_NOTICES', 'public/fonts/Inter-LICENSE.txt', 'public/vendor/codemirror.LICENSE.txt', 'public/vendor/svg.LICENSE.txt', 'public/vendor/lit-html.LICENSE.txt',
   'node_modules/proper-lockfile/LICENSE', 'node_modules/graceful-fs/LICENSE', 'node_modules/retry/License', 'node_modules/signal-exit/LICENSE.txt'];
 let licenses = '';
 for (const path of notices) licenses += `\n--- ${path} ---\n${await readFile(join(root, path), 'utf8')}\n`;

@@ -1,10 +1,12 @@
+import { html, render as renderTemplate, repeat, nothing, live } from './vendor/lit-html.js';
+import { githubUrl } from './templates.js';
 import { renderRow } from './row.js';
 import { drawDependencies } from './dependencies.js';
 import { createPollingSchedule, pendingPulls } from './polling.js';
 import { createViewedStore, createLatestRequest, mergePullPages, createMergedStore } from './state.js';
 import { createIssuePopover } from './issues.js';
 import { element, icon, clipboardFeedback } from './ui.js';
-import { assignNameColors, NAME_COLOR_COUNT, dependencyLanes, groupPulls, labels, relativeTime } from './model.js';
+import { assignNameColors, dependencyLanes, groupPulls, labels } from './model.js';
 import { queryFromParams, queryPresets, setQueryPreset, normalizeQuery, queryError, matchesQueryState } from './query.js';
 
 const $ = id => document.getElementById(id);
@@ -45,7 +47,7 @@ function scheduleMergeReadiness(attempt = 0) {
       for (const update of data.items) {
         const pr = items.find(item => item.id === update.id);
         // Never offer a merge against a commit that is not the displayed version.
-        if (pr?.status === 'OPEN' && !protectedPull(pr.id) && pr.headOid === update.headOid) Object.assign(pr, update);
+        if (pr?.status === 'OPEN' && !savingPull(pr.id) && pr.headOid === update.headOid) Object.assign(pr, update);
       }
       render();
     } catch (error) {
@@ -80,6 +82,7 @@ function updateRefreshButton() {
   $('refresh').setAttribute('aria-busy', String(busy));
 }
 
+function savingPull(id) { return titleEdits.get(id)?.saving || draftChanges.get(id)?.saving || merges.get(id)?.saving; }
 function protectedPull(id) {
   return titleEdits.has(id) || issuePopover.pullId === id || draftChanges.get(id)?.saving || merges.get(id)?.saving;
 }
@@ -111,7 +114,7 @@ async function refreshStatus() {
     for (const incoming of data.items) {
       const update = mergedStore.reconcile(incoming);
       const current = items.find(pr => pr.id === update.id);
-      if (!current || protectedPull(current.id) || Date.parse(update.updatedAt) < Date.parse(current.updatedAt)) continue;
+      if (!current || savingPull(current.id) || Date.parse(update.updatedAt) < Date.parse(current.updatedAt)) continue;
       if (JSON.stringify(current) !== JSON.stringify(update)) {
         reconcile ||= ['status', 'checks', 'review'].some(key => current[key] !== update[key]);
         Object.assign(current, update); changed = true;
@@ -175,97 +178,40 @@ function updateSummary() {
   $('summary').textContent = `${items.length} loaded · ${total} total${loading ? ' · Loading…' : ''}${limited ? ' · GitHub search returns at most 1,000 results. Narrow your query to see more specific results.' : ''}`;
 }
 
-function updateTitleBrightness() {
-  const byId = new Map(items.map(pr => [pr.id, pr]));
-  for (const row of $('results').querySelectorAll('.pr-row')) {
-    const pr = byId.get(row.dataset.prId);
-    const hasUpdates = pr && viewedStore.hasUpdates(pr);
-    row.classList.toggle('has-updates', Boolean(hasUpdates));
-    if (pr) row.querySelector('.pr-title').setAttribute('aria-label', `${hasUpdates ? 'New updates: ' : ''}${pr.title} (opens in a new tab)`);
-  }
-  updateSummary();
-}
-
 function markViewed(pr) {
-  if (viewedStore.mark(pr)) updateTitleBrightness();
+  if (viewedStore.mark(pr)) render();
 }
 
 window.addEventListener('storage', event => {
-  if (viewedStore.storageChanged(event.key)) updateTitleBrightness();
+  if (viewedStore.storageChanged(event.key)) render();
 });
-
-function badge(text, kind) { return element('span', text, `badge ${kind.toLowerCase()}`); }
 
 // Keep conflict resolution, merge availability, and app-access messaging together.
 function createMergeAction(pr, prUrl) {
-  if (pr.status !== 'OPEN' || pr.author.toLowerCase() !== viewerLogin.toLowerCase()) return null;
-  if (pr.hasConflicts) {
-    if (!prUrl) return null;
-    const resolve = element('a', 'Resolve conflict', 'badge review_required conflict-action');
-    const url = new URL(prUrl);
-    url.pathname = `${url.pathname.replace(/\/$/, '')}/conflicts`;
-    url.search = ''; url.hash = '';
-    resolve.href = url.href;
-    resolve.target = '_blank'; resolve.rel = 'noopener noreferrer';
-    resolve.dataset.viewPr = '';
-    resolve.title = 'Resolve merge conflicts on GitHub (opens in a new tab)';
-    return resolve;
-  }
-  if (!pr.canMerge) return null;
-  const actions = document.createDocumentFragment();
-  const labels = { MERGE: 'Merge', SQUASH: 'Squash and merge', REBASE: 'Rebase and merge' };
-  const methods = (pr.mergeMethods ?? [pr.mergeMethod]).filter(method => labels[method]);
-  if (!methods.length) return null;
+  if (pr.status !== 'OPEN' || pr.author.toLowerCase() !== viewerLogin.toLowerCase()) return nothing;
+  if (pr.hasConflicts) return prUrl ? html`<a class="badge review_required conflict-action" href=${githubUrl(prUrl, 'conflicts')}
+    target="_blank" rel="noopener noreferrer" data-view-pr title="Resolve merge conflicts on GitHub (opens in a new tab)">Resolve conflict</a>` : nothing;
+  if (!pr.canMerge) return nothing;
+  const names = { MERGE: 'Merge', SQUASH: 'Squash and merge', REBASE: 'Rebase and merge' };
+  const methods = (pr.mergeMethods ?? [pr.mergeMethod]).filter(method => names[method]);
+  if (!methods.length) return nothing;
   if (!methods.includes(mergeSelections.get(pr.id))) mergeSelections.delete(pr.id);
-  let selected = mergeSelections.get(pr.id) ?? (methods.includes(pr.mergeMethod) ? pr.mergeMethod : methods[0]);
-  const method = labels[selected];
-  const merge = element('button', merges.get(pr.id)?.saving ? 'Merging…' : method, 'badge open merge-action');
-  merge.type = 'button';
-  merge.setAttribute('aria-label', `${method} ${pr.repo} #${pr.number}`);
-  const blockedAccess = authMode === 'github-app' && !pr.mergeAccess?.allowed;
-  merge.disabled = blockedAccess || Boolean(merges.get(pr.id)?.saving || draftChanges.get(pr.id)?.saving || titleEdits.has(pr.id));
-  merge.addEventListener('click', () => mergePull(pr, selected));
-  const controls = element('span', undefined, 'merge-controls');
-  controls.append(merge);
-  if (methods.length > 1) {
-    controls.classList.add('merge-split');
-    const chooser = element('span', undefined, 'merge-method-trigger open');
-    const select = element('select', undefined, 'merge-method');
-    select.setAttribute('aria-label', `Merge method for ${pr.repo} #${pr.number}`);
-    select.title = 'Merge method';
-    for (const value of methods) {
-      const option = element('option', { MERGE: 'Merge commit', SQUASH: 'Squash', REBASE: 'Rebase' }[value]);
-      option.value = value;
-      select.append(option);
-    }
-    select.value = selected;
-    select.disabled = merge.disabled;
-    select.addEventListener('change', () => {
-      selected = select.value;
-      mergeSelections.set(pr.id, selected);
-      merge.textContent = labels[selected];
-      merge.setAttribute('aria-label', `${labels[selected]} ${pr.repo} #${pr.number}`);
-    });
-    chooser.append(select);
-    controls.append(chooser);
-  }
-  if (blockedAccess) {
-    const message = pr.mergeAccess?.message || 'Could not verify app access. Refresh to try again.';
-    const control = element('span', undefined, 'merge-access-blocked');
-    control.setAttribute('role', 'group');
-    control.title = message;
-    control.tabIndex = 0;
-    control.setAttribute('aria-label', `${method} unavailable. ${message}`);
-    control.append(controls); actions.append(control);
-    if (pr.mergeAccess?.url) {
-      const install = element('a', pr.mergeAccess.action, 'merge-access-link');
-      install.href = pr.mergeAccess.url;
-      install.target = '_blank'; install.rel = 'noopener noreferrer';
-      install.title = 'Complete setup on GitHub, then refresh this page. Organization access may require owner approval.';
-      actions.append(install);
-    }
-  } else actions.append(controls);
-  return actions;
+  const selected = mergeSelections.get(pr.id) ?? (methods.includes(pr.mergeMethod) ? pr.mergeMethod : methods[0]);
+  const blocked = authMode === 'github-app' && !pr.mergeAccess?.allowed;
+  const disabled = blocked || Boolean(merges.get(pr.id)?.saving || draftChanges.get(pr.id)?.saving || titleEdits.has(pr.id));
+  const controls = html`<span class=${`merge-controls${methods.length > 1 ? ' merge-split' : ''}`}>
+    <button class="badge open merge-action" type="button" aria-label=${`${names[selected]} ${pr.repo} #${pr.number}`} ?disabled=${disabled}
+      @click=${() => mergePull(pr, selected)}>${merges.get(pr.id)?.saving ? 'Merging…' : names[selected]}</button>
+    ${methods.length > 1 ? html`<span class="merge-method-trigger open"><select class="merge-method" title="Merge method"
+      aria-label=${`Merge method for ${pr.repo} #${pr.number}`} ?disabled=${disabled}
+      @change=${event => { mergeSelections.set(pr.id, event.target.value); render(); }}>
+      ${methods.map(method => html`<option value=${method} .selected=${method === selected}>${{ MERGE: 'Merge commit', SQUASH: 'Squash', REBASE: 'Rebase' }[method]}</option>`)}
+    </select></span>` : nothing}
+  </span>`;
+  const message = pr.mergeAccess?.message || 'Could not verify app access. Refresh to try again.';
+  return blocked ? html`<span class="merge-access-blocked" role="group" title=${message} tabindex="0" aria-label=${`${names[selected]} unavailable. ${message}`}>${controls}</span>
+    ${pr.mergeAccess?.url ? html`<a class="merge-access-link" href=${pr.mergeAccess.url} target="_blank" rel="noopener noreferrer"
+      title="Complete setup on GitHub, then refresh this page. Organization access may require owner approval.">${pr.mergeAccess.action}</a>` : nothing}` : controls;
 }
 
 function usernameLink(username, className = '') {
@@ -276,12 +222,6 @@ function usernameLink(username, className = '') {
   link.target = '_blank'; link.rel = 'noopener noreferrer';
   link.setAttribute('aria-label', `${username}'s GitHub profile (opens in a new tab)`);
   return link;
-}
-
-function usernameBadge(username) {
-  const name = usernameLink(username, 'badge author');
-  name.style.setProperty('--author-hue', nameColors[username.toLowerCase()] * 360 / NAME_COLOR_COUNT);
-  return name;
 }
 
 function repositoryLink(repo) {
@@ -367,50 +307,32 @@ function focusTitleControl(id, selector) {
 
 function titleEditor(pr) {
   const draft = titleEdits.get(pr.id);
-  const form = element('form', undefined, 'title-editor');
-  form.setAttribute('aria-label', `Edit title of ${pr.repo} #${pr.number}`);
-  const input = element('input');
-  input.type = 'text'; input.value = draft.value; input.required = true; input.maxLength = 256;
-  input.setAttribute('aria-label', 'Pull request title');
-  input.disabled = draft.saving;
-  const save = element('button', draft.saving ? 'Saving…' : 'Save');
-  save.type = 'submit';
-  save.disabled = draft.saving || !draft.value.trim() || draft.value.trim() === draft.expectedTitle;
-  const cancel = element('button', 'Cancel');
-  cancel.type = 'button'; cancel.disabled = draft.saving;
   const close = () => {
     if (draft.saving) return;
-    titleEdits.delete(pr.id); render(); focusTitleControl(pr.id, '.edit-title');
-    polling.invalidate();
+    titleEdits.delete(pr.id); render(); focusTitleControl(pr.id, '.edit-title'); polling.invalidate();
   };
-  cancel.addEventListener('click', close);
-  input.addEventListener('input', () => {
-    draft.value = input.value;
-    save.disabled = !input.value.trim() || input.value.trim() === draft.expectedTitle;
-  });
-  form.addEventListener('keydown', event => { if (event.key === 'Escape') { event.preventDefault(); close(); } });
-  form.append(input, save, cancel);
-  if (draft.error) {
-    const error = element('p', draft.error, 'title-error error-message');
-    error.setAttribute('role', 'alert'); form.append(error);
-  }
-  form.addEventListener('submit', async event => {
+  const submit = async event => {
     event.preventDefault();
     if (draft.saving || !draft.value.trim() || draft.value.trim() === draft.expectedTitle) return;
     await changePull(pr, titleEdits, {
-      action: 'title', input: { title: draft.value.trim(), expectedTitle: draft.expectedTitle },
-      message: 'Title updated',
-      apply(current, data) {
-        if (current) Object.assign(current, { title: data.title, updatedAt: data.updatedAt });
-      },
+      action: 'title', input: { title: draft.value.trim(), expectedTitle: draft.expectedTitle }, message: 'Title updated',
+      apply(current, data) { if (current) Object.assign(current, { title: data.title, updatedAt: data.updatedAt }); },
       onSuccess: () => focusTitleControl(pr.id, '.edit-title'),
       onError: () => focusTitleControl(pr.id, '.title-editor input'),
     });
-  });
-  return form;
+  };
+  return html`<form class="title-editor" aria-label=${`Edit title of ${pr.repo} #${pr.number}`} @submit=${submit}
+    @keydown=${event => { if (event.key === 'Escape') { event.preventDefault(); close(); } }}>
+    <input type="text" .value=${live(draft.value)} required maxlength="256" aria-label="Pull request title" ?disabled=${draft.saving}
+      @input=${event => { draft.value = event.target.value; render(); }}>
+    <button type="submit" ?disabled=${draft.saving || !draft.value.trim() || draft.value.trim() === draft.expectedTitle}>${draft.saving ? 'Saving…' : 'Save'}</button>
+    <button type="button" ?disabled=${draft.saving} @click=${close}>Cancel</button>
+    ${draft.error ? html`<p class="title-error error-message" role="alert">${draft.error}</p>` : nothing}
+  </form>`;
 }
 
-const rowCache = new Map();
+// Row containers survive regrouping; Lit owns and diffs everything inside.
+const rowElements = new Map();
 const groupCache = new Map();
 
 // Keep retained nodes mounted; moving a node only when its order changes also
@@ -431,9 +353,11 @@ function place(parent, child, before) {
 function render() {
   const { count, groups } = groupPulls(items, { group: $('group').value, sort: 'query' });
   updateSummary();
+  const focused = document.activeElement;
+  const selection = typeof focused?.selectionStart === 'number' ? [focused.selectionStart, focused.selectionEnd, focused.selectionDirection] : null;
   const results = $('results'), activeGroups = new Set(), activeRows = new Set();
   let nextSection = results.firstElementChild;
-  const ctx = { viewedStore, markViewed, viewerLogin, draftChanges, merges, titleEdits, changeDraftStatus, badge, usernameBadge, repositoryLink, render, focusTitleControl, createMergeAction, issuePopover, titleEditor };
+  const ctx = { viewedStore, markViewed, viewerLogin, draftChanges, merges, titleEdits, changeDraftStatus, render, focusTitleControl, createMergeAction, issuePopover, titleEditor, nameColors };
   for (const [name, prs] of groups) {
     const key = `${$('group').value}:${name}`;
     activeGroups.add(key);
@@ -461,52 +385,18 @@ function render() {
     list.classList.toggle('has-dependency-lanes', Boolean(graph.gutter));
     if (graph.gutter) list.style.setProperty('--lane-gutter', `${graph.gutter}px`);
     else list.style.removeProperty('--lane-gutter');
-    const groupIds = new Set(graph.rows.map(node => node.pr.id));
-    let rowsChanged = false;
-    for (const entry of [...list.children]) if (!groupIds.has(entry.querySelector('.pr-row')?.dataset.prId)) {
-      entry.remove(); rowsChanged = true;
-    }
-    let nextRow = list.firstElementChild;
-    for (const node of graph.rows) {
-      const { pr } = node;
-      activeRows.add(pr.id);
-      // updatedAt alone misses changes to checks, reviews and merge readiness.
-      // Read/unread styling is patched by updateTitleBrightness(), not this key.
-      // Retained callbacks can use their original PR snapshot because the key
-      // compares all PR fields; mutations resolve the current item by ID.
-      const local = JSON.stringify([titleEdits.has(pr.id), titleEdits.get(pr.id)?.saving,
-        titleEdits.get(pr.id)?.error, draftChanges.get(pr.id), merges.get(pr.id)]);
-      const signature = JSON.stringify([pr, local, viewerLogin, authMode,
-        [pr.author, ...(pr.reviewers ?? []).map(r => r.name)].map(name => nameColors[name.toLowerCase()]),
-        node.parent?.pr.id, node.parent?.pr.title, node.parent?.pr.number, node.externalParent,
-        node.mergedParent, node.unloadedBase, node.lane, Boolean(graph.gutter)]);
-      let cached = rowCache.get(pr.id);
-      const retained = cached && (cached.signature === signature ||
-        (protectedPull(pr.id) && cached.local === local));
-      if (!retained) {
-        const entry = renderRow(node, graph.gutter, ctx);
-        if (cached?.entry === nextRow) nextRow = cached.entry.nextElementSibling;
-        cached?.entry.remove();
-        cached = { entry, signature, local };
-        rowCache.set(pr.id, cached);
-        rowsChanged = true;
-      }
-      // Structural gutter changes must not detach a protected editor/popover.
-      // Its dependency labels catch up when protection ends and the row rebuilds.
-      const gutter = cached.entry.querySelector('.dependency-gutter');
-      if (graph.gutter && !gutter) {
-        const spacer = element('div', undefined, 'dependency-gutter');
-        spacer.setAttribute('aria-hidden', 'true'); cached.entry.prepend(spacer);
-      } else if (!graph.gutter) gutter?.remove();
-      if (cached.entry !== nextRow) rowsChanged = true;
-      place(list, cached.entry, nextRow);
-      nextRow = cached.entry.nextElementSibling;
-      // Relative ages can change without rebuilding the row or its controls.
-      const time = cached.entry.querySelector('time');
-      const age = relativeTime(pr.updatedAt);
-      time.lastChild.textContent = age;
-      time.setAttribute('aria-label', `Updated ${age}`);
-    }
+    // Lit repeat owns ordering. Restore focus if a browser drops it while
+    // moving a keyed range (including the native popover trigger).
+    const entries = graph.rows.map(node => {
+      let entry = rowElements.get(node.pr.id);
+      if (!entry) { entry = element('li', undefined, 'dependency-node'); rowElements.set(node.pr.id, entry); }
+      activeRows.add(node.pr.id);
+      renderTemplate(renderRow(node, graph.gutter, ctx), entry);
+      return { id: node.pr.id, entry };
+    });
+    const rowsChanged = group.rowIds !== entries.map(({ id }) => id).join('|');
+    group.rowIds = entries.map(({ id }) => id).join('|');
+    renderTemplate(repeat(entries, row => row.id, row => row.entry), list);
     const graphKey = JSON.stringify([graph.gutter, graph.rows.map(n =>
       [n.pr.id, n.lane, n.parentIndex, n.nodeStatus, n.externalParent, n.unloadedBase])]);
     if (rowsChanged || group.graphKey !== graphKey) {
@@ -515,13 +405,18 @@ function render() {
       group.graphKey = graphKey;
     }
   }
-  for (const [id, cached] of rowCache) if (!activeRows.has(id)) {
-    cached.entry.remove(); rowCache.delete(id);
+  for (const [id, entry] of rowElements) if (!activeRows.has(id)) {
+    renderTemplate(nothing, entry); entry.remove(); rowElements.delete(id);
   }
   for (const [key, group] of groupCache) if (!activeGroups.has(key)) {
     group.clear(); group.section.remove(); groupCache.delete(key);
   }
   if (issuePopover.isOpen && !activeRows.has(issuePopover.pullId)) issuePopover.close();
+  if (focused?.isConnected && document.activeElement !== focused) {
+    focused.focus({ preventScroll: true });
+    if (selection) focused.setSelectionRange(...selection);
+  }
+  issuePopover.reposition();
   results.querySelector('.empty')?.remove();
   if (!count && !loading) results.append(element('p', 'No pull requests found for this query.', 'empty'));
   results.setAttribute('aria-busy', String(loading));
@@ -582,7 +477,7 @@ async function load({ append = false, refresh = false, background = false } = {}
     }
     // Preserve only active rows; unrelated PRs can continue refreshing.
     const protectedItems = new Map(items.filter(pr => protectedPull(pr.id)).map(pr => [pr.id, pr]));
-    data.items = data.items.map(pr => protectedItems.get(pr.id) ?? mergedStore.reconcile(pr));
+    data.items = data.items.map(pr => savingPull(pr.id) ? protectedItems.get(pr.id) ?? pr : mergedStore.reconcile(pr));
     let retainedMissing = 0;
     for (const [index, pr] of items.entries()) {
       if (protectedItems.has(pr.id) && !data.items.some(item => item.id === pr.id)) {

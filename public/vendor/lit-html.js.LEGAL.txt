@@ -1,0 +1,26 @@
+Bundled license information:
+
+lit-html/lit-html.js:
+lit-html/directive.js:
+lit-html/directives/repeat.js:
+lit-html/async-directive.js:
+  /**
+   * @license
+   * Copyright 2017 Google LLC
+   * SPDX-License-Identifier: BSD-3-Clause
+   */
+
+lit-html/directive-helpers.js:
+lit-html/directives/live.js:
+  /**
+   * @license
+   * Copyright 2020 Google LLC
+   * SPDX-License-Identifier: BSD-3-Clause
+   */
+
+lit-html/directives/guard.js:
+  /**
+   * @license
+   * Copyright 2018 Google LLC
+   * SPDX-License-Identifier: BSD-3-Clause
+   */

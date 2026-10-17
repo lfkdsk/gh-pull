@@ -18,3 +18,9 @@ await build({
   bundle: true, minify: true, format: 'esm', target: ['es2022'], legalComments: 'external',
 });
 await writeFile('public/vendor/svg.LICENSE.txt', await readFile('node_modules/@svgdotjs/svg.js/LICENSE.txt', 'utf8'));
+
+await build({
+  entryPoints: ['scripts/vendor/lit-html.js'], outfile: 'public/vendor/lit-html.js',
+  bundle: true, minify: true, format: 'esm', target: ['es2022'], legalComments: 'external',
+});
+await writeFile('public/vendor/lit-html.LICENSE.txt', await readFile('node_modules/lit-html/LICENSE', 'utf8'));
