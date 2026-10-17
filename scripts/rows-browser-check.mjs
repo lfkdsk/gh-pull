@@ -176,3 +176,19 @@ test('retained clipboard buttons copy the latest value once and restore their ic
   assert.equal(await button.locator('.copy-symbol svg').count(), 1);
   assert.deepEqual(f.errors, []);
 });
+
+test('typing a title updates its row without rendering the dashboard', async t => {
+  const f = await fixture(t), { page } = f;
+  await page.locator('[data-pr-id="pr-1"] .edit-title').click();
+  await page.evaluate(() => {
+    window.dashboardRenders = 0;
+    window.observer = new MutationObserver(records => { window.dashboardRenders += records.filter(r => r.attributeName === 'aria-busy').length; });
+    window.observer.observe(document.querySelector('#results'), { attributes: true });
+  });
+  await page.locator('.title-editor input').pressSequentially(' edited');
+  assert.equal(await page.locator('.title-editor button[type="submit"]').isEnabled(), true);
+  assert.equal(await page.evaluate(() => window.dashboardRenders), 0);
+  await page.locator('.title-editor input').fill('');
+  assert.equal(await page.locator('.title-editor button[type="submit"]').isEnabled(), false);
+  assert.deepEqual(f.errors, []);
+});

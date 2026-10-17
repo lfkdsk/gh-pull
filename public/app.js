@@ -1,5 +1,5 @@
 import { html, render as renderTemplate, repeat, nothing, live } from './vendor/lit-html.js';
-import { githubUrl } from './templates.js';
+import { githubUrl, usernameLink, repositoryLink } from './templates.js';
 import { renderRow } from './row.js';
 import { drawDependencies } from './dependencies.js';
 import { createPollingSchedule, pendingPulls } from './polling.js';
@@ -214,24 +214,6 @@ function createMergeAction(pr, prUrl) {
       title="Complete setup on GitHub, then refresh this page. Organization access may require owner approval.">${pr.mergeAccess.action}</a>` : nothing}` : controls;
 }
 
-function usernameLink(username, className = '') {
-  // Team names and the missing-author placeholder are not user profiles.
-  if (username === 'deleted-user' || !/^[a-z\d](?:[a-z\d-]*[a-z\d])?$/i.test(username)) return element('span', username, className);
-  const link = element('a', username, `${className} username-link`.trim());
-  link.href = `https://github.com/${encodeURIComponent(username)}`;
-  link.target = '_blank'; link.rel = 'noopener noreferrer';
-  link.setAttribute('aria-label', `${username}'s GitHub profile (opens in a new tab)`);
-  return link;
-}
-
-function repositoryLink(repo) {
-  const link = element('a', repo, 'repo-link');
-  link.href = `https://github.com/${repo.split('/').map(encodeURIComponent).join('/')}`;
-  link.target = '_blank'; link.rel = 'noopener noreferrer';
-  link.setAttribute('aria-label', `${repo} repository (opens in a new tab)`);
-  return link;
-}
-
 const changeMessages = {
   title: { failure: 'Could not update the title. Please retry.', timeout: 'The save timed out. Retry to check and save the title.' },
   status: { failure: 'Could not change the PR status. Please retry.', timeout: 'Status change timed out. Click the status badge to retry or refresh to check its status.' },
@@ -324,7 +306,7 @@ function titleEditor(pr) {
   return html`<form class="title-editor" aria-label=${`Edit title of ${pr.repo} #${pr.number}`} @submit=${submit}
     @keydown=${event => { if (event.key === 'Escape') { event.preventDefault(); close(); } }}>
     <input type="text" .value=${live(draft.value)} required maxlength="256" aria-label="Pull request title" ?disabled=${draft.saving}
-      @input=${event => { draft.value = event.target.value; render(); }}>
+      @input=${event => { draft.value = event.target.value; renderEditorRow(pr.id); }}>
     <button type="submit" ?disabled=${draft.saving || !draft.value.trim() || draft.value.trim() === draft.expectedTitle}>${draft.saving ? 'Saving…' : 'Save'}</button>
     <button type="button" ?disabled=${draft.saving} @click=${close}>Cancel</button>
     ${draft.error ? html`<p class="title-error error-message" role="alert">${draft.error}</p>` : nothing}
@@ -334,6 +316,13 @@ function titleEditor(pr) {
 // Row containers survive regrouping; Lit owns and diffs everything inside.
 const rowElements = new Map();
 const groupCache = new Map();
+const rowContext = () => ({ viewedStore, markViewed, viewerLogin, draftChanges, merges, titleEdits,
+  changeDraftStatus, render, focusTitleControl, createMergeAction, issuePopover, titleEditor, nameColors });
+function renderEditorRow(id) {
+  const row = rowElements.get(id);
+  if (row) renderTemplate(renderRow(row.node, row.gutter, rowContext()), row.entry);
+}
+
 
 // Keep retained nodes mounted; moving a node only when its order changes also
 // preserves browser-managed focus and popover state on ordinary refreshes.
@@ -357,7 +346,7 @@ function render() {
   const selection = typeof focused?.selectionStart === 'number' ? [focused.selectionStart, focused.selectionEnd, focused.selectionDirection] : null;
   const results = $('results'), activeGroups = new Set(), activeRows = new Set();
   let nextSection = results.firstElementChild;
-  const ctx = { viewedStore, markViewed, viewerLogin, draftChanges, merges, titleEdits, changeDraftStatus, render, focusTitleControl, createMergeAction, issuePopover, titleEditor, nameColors };
+  const ctx = rowContext();
   for (const [name, prs] of groups) {
     const key = `${$('group').value}:${name}`;
     activeGroups.add(key);
@@ -374,13 +363,8 @@ function render() {
     const { section, heading, list } = group;
     place(results, section, nextSection);
     nextSection = section.nextElementSibling;
-    if (group.count !== prs.length) {
-      heading.replaceChildren();
-      if ($('group').value === 'repo') heading.append(repositoryLink(name), document.createTextNode(` (${prs.length})`));
-      else if ($('group').value === 'author') heading.append(usernameLink(name), document.createTextNode(` (${prs.length})`));
-      else heading.textContent = `${labels[name] ?? name} (${prs.length})`;
-      group.count = prs.length;
-    }
+    renderTemplate(html`${$('group').value === 'repo' ? repositoryLink(name)
+      : $('group').value === 'author' ? usernameLink(name) : labels[name] ?? name} (${prs.length})`, heading);
     const graph = dependencyLanes(prs, { allItems: items, sort: queryPresets(appliedQuery).sort });
     list.classList.toggle('has-dependency-lanes', Boolean(graph.gutter));
     if (graph.gutter) list.style.setProperty('--lane-gutter', `${graph.gutter}px`);
@@ -388,24 +372,22 @@ function render() {
     // Lit repeat owns ordering. Restore focus if a browser drops it while
     // moving a keyed range (including the native popover trigger).
     const entries = graph.rows.map(node => {
-      let entry = rowElements.get(node.pr.id);
-      if (!entry) { entry = element('li', undefined, 'dependency-node'); rowElements.set(node.pr.id, entry); }
+      const entry = rowElements.get(node.pr.id)?.entry ?? element('li', undefined, 'dependency-node');
+      rowElements.set(node.pr.id, { entry, node, gutter: graph.gutter });
       activeRows.add(node.pr.id);
       renderTemplate(renderRow(node, graph.gutter, ctx), entry);
       return { id: node.pr.id, entry };
     });
-    const rowsChanged = group.rowIds !== entries.map(({ id }) => id).join('|');
-    group.rowIds = entries.map(({ id }) => id).join('|');
     renderTemplate(repeat(entries, row => row.id, row => row.entry), list);
     const graphKey = JSON.stringify([graph.gutter, graph.rows.map(n =>
       [n.pr.id, n.lane, n.parentIndex, n.nodeStatus, n.externalParent, n.unloadedBase])]);
-    if (rowsChanged || group.graphKey !== graphKey) {
+    if (group.graphKey !== graphKey) {
       group.clear();
       group.clear = graph.gutter ? drawDependencies([{ list, graph }]) : () => {};
       group.graphKey = graphKey;
     }
   }
-  for (const [id, entry] of rowElements) if (!activeRows.has(id)) {
+  for (const [id, { entry }] of rowElements) if (!activeRows.has(id)) {
     renderTemplate(nothing, entry); entry.remove(); rowElements.delete(id);
   }
   for (const [key, group] of groupCache) if (!activeGroups.has(key)) {

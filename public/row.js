@@ -54,7 +54,7 @@ export function renderRow(node, gutter, ctx) {
           aria-label=${pr.status === 'OPEN' ? `Convert ${pr.title} to draft` : `Mark ${pr.title} ready for review`}
           @click=${() => changeDraftStatus(pr)}>${pending ? 'Updating…' : labels[pr.status]}</button>` : badge(labels[pr.status], pr.status)}
         ${hasUrl ? html`<span class="pr-links">
-          <button class="copy-link icon-button" type="button" title="Copy PR link" aria-label=${`Copy link to ${pr.title}`} ${copyFeedback(url, 'PR link copied', 'Copy PR link')}><span class="copy-symbol">${icon('copy')}</span></button>
+          <button class="copy-link icon-button" type="button" title="Copy PR link" aria-label=${`Copy link to ${pr.title}`} ${copyFeedback(url, 'PR link copied', 'Copy PR link')}><span class="copy-symbol">${icon('copy')}</span><span class="copy-feedback-symbol" aria-hidden="true" hidden></span></button>
           <a class="pr-files icon-button" href=${githubUrl(pr.url, 'files')} target="_blank" rel="noopener noreferrer" data-view-pr
             title="View code changes (opens in a new tab)" aria-label=${`View code changes for ${pr.title}${filesKnown ? `, ${pr.changedFiles} ${pr.changedFiles === 1 ? 'file' : 'files'} changed` : ''} (opens in a new tab)`}>${icon('files')}${filesKnown ? html`<span class="file-count">${pr.changedFiles}</span>` : nothing}</a>
         </span>` : nothing}
@@ -69,7 +69,7 @@ export function renderRow(node, gutter, ctx) {
       <div class="meta">
         <span class="badge">${repositoryLink(pr.repo)} #${pr.number}</span>${author(pr.author)}${checks(pr)}${dependency(node)}
         ${pr.branch ? html`<button class="branch-copy" type="button" title=${`Copy branch name: ${pr.branch}`} aria-label=${`Copy branch name: ${pr.branch}`}
-          ${copyFeedback(pr.branch, 'Branch name copied', `Copy branch name: ${pr.branch}`)}><span class="branch-name">${pr.branch}</span><span class="branch-copy-symbol copy-symbol" aria-hidden="true">${icon('copy', 14)}</span></button>` : nothing}
+          ${copyFeedback(pr.branch, 'Branch name copied', `Copy branch name: ${pr.branch}`)}><span class="branch-name">${pr.branch}</span><span class="branch-copy-symbol" aria-hidden="true"><span class="copy-symbol">${icon('copy', 14)}</span><span class="copy-feedback-symbol" hidden></span></span></button>` : nothing}
         ${pr.review !== 'NONE' ? badge(reviewLabels[pr.review] ?? pr.review, pr.review, pr.review === 'REVIEW_BYPASS_AVAILABLE' ? 'GitHub requires reviews for this branch, but your account can bypass branch protections.' : nothing) : nothing}
         <time class="updated-time" datetime=${pr.updatedAt} title=${`Updated ${new Date(pr.updatedAt).toLocaleString()}`} aria-label=${`Updated ${age}`}>${icon('clock', 14)}${age}</time>
         <span class="diff-counts" title=${diff} aria-label=${diff}><span class="additions success">${pr.additions}</span><span class="deletions failure">${pr.deletions}</span></span>

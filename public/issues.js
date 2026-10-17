@@ -51,7 +51,7 @@ export function createIssuePopover({ onClose = () => {} } = {}) {
                 <span class="issue-title">${issue.title}</span><span class="issue-detail">${closed ? 'Closed' : 'Open'} · ${issue.repo} #${issue.number}</span></a></li>`;
           })}</ul>${pr.closingIssuesTruncated || count > (pr.closingIssues?.length ?? 0) ? html`<a class="issue-more" href=${githubUrl(pr.url)} target="_blank" rel="noopener noreferrer">View all linked issues on GitHub ↗</a>` : nothing}`, panel);
       };
-      if (isOpen() && trigger?.closest('.pr-row')?.dataset.prId === pr.id) { content(); position(); }
+      if (isOpen() && trigger?.closest('.pr-row')?.dataset.prId === pr.id) { content(); }
       if (!count) return nothing;
       const title = `Closes ${count} ${count === 1 ? 'issue' : 'issues'}`;
       return html`<button class="issue-count" type="button" title=${title} aria-label=${`${title} · ${pr.repo} #${pr.number}`}

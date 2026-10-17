@@ -11,10 +11,20 @@ export function githubUrl(value, suffix = '') {
     return url.href;
   } catch { return nothing; }
 }
+// Use CSSOM even on the first render; styleMap initially writes a style
+// attribute, which is still blocked by a strict style-src-attr policy.
+const authorHue = directive(class extends AsyncDirective {
+  render() { return nothing; }
+  update(part, [hue]) {
+    if (hue === undefined) part.element.style.removeProperty('--author-hue');
+    else part.element.style.setProperty('--author-hue', String(hue));
+    return nothing;
+  }
+});
 export function usernameLink(name, className = '', hue) {
   const classes = `${className} username-link`;
   if (name === 'deleted-user' || !/^[a-z\d](?:[a-z\d-]*[a-z\d])?$/i.test(name)) return html`<span class=${classes}>${name}</span>`;
-  return html`<a class=${classes} style=${hue === undefined ? nothing : `--author-hue:${hue}`}
+  return html`<a class=${classes} ${authorHue(hue)}
     href=${`https://github.com/${encodeURIComponent(name)}`} target="_blank" rel="noopener noreferrer"
     aria-label=${`${name}'s GitHub profile (opens in a new tab)`}>${name}</a>`;
 }
@@ -36,12 +46,13 @@ class ClipboardDirective extends AsyncDirective {
         const revision = this.revision;
         const symbol = this.button.querySelector('.copy-symbol');
         const feedback = this.button.closest('.pr-row').querySelector('[role="status"]');
-        const original = [...symbol.childNodes];
-        this.reset = () => { symbol.replaceChildren(...original); this.button.title = this.title; feedback.textContent = ''; };
+        const indicator = this.button.querySelector('.copy-feedback-symbol');
+        this.reset = () => { symbol.hidden = false; indicator.hidden = true; indicator.textContent = ''; this.button.title = this.title; feedback.textContent = ''; };
         let copied = true;
         try { await navigator.clipboard.writeText(this.text); } catch { copied = false; }
         if (revision !== this.revision) return;
-        symbol.textContent = copied ? '✓' : '!';
+        symbol.hidden = true; indicator.hidden = false;
+        indicator.textContent = copied ? '✓' : '!';
         this.button.title = copied ? this.success : 'Could not copy. Allow clipboard access and retry.';
         if (!this.isConnected) { this.restore(); return; }
         feedback.textContent = this.button.title;
