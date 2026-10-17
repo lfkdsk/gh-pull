@@ -1,4 +1,4 @@
-const HOUR = 60 * 60 * 1000;
+const CHECK_INTERVAL = 5 * 60 * 1000;
 
 function releaseParts(tag) {
   const match = typeof tag === 'string' && /^v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.exec(tag);
@@ -27,7 +27,7 @@ export function createUpdateCheck(version, { fetchImpl = fetch, now = Date.now }
           : null;
         return cached;
       } catch { return cached; }
-      finally { nextCheck = now() + HOUR; }
+      finally { nextCheck = now() + CHECK_INTERVAL; }
     })();
     try { return await pending; }
     finally { pending = null; }

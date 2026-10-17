@@ -691,8 +691,12 @@ clipboardFeedback($('copy-update-command'), {
 });
 
 let updateTimer;
+let extensionUpdatesEnabled = false;
+document.addEventListener('visibilitychange', checkExtensionUpdate);
+window.addEventListener('focus', checkExtensionUpdate);
+window.addEventListener('online', checkExtensionUpdate);
 async function checkExtensionUpdate() {
-  if (document.hidden) return;
+  if (!extensionUpdatesEnabled || document.hidden) return;
   try {
     const response = await fetch('/api/updates');
     if (!response.ok) return;
@@ -714,9 +718,10 @@ async function initializeSession() {
     if (!response.ok) throw new Error('Could not connect. Please retry.');
     const session = await response.json();
     clearInterval(updateTimer);
-    if (session.mode === 'local' && session.version?.label) {
+    extensionUpdatesEnabled = session.mode === 'local' && Boolean(session.version?.label);
+    if (extensionUpdatesEnabled) {
       void checkExtensionUpdate();
-      updateTimer = setInterval(checkExtensionUpdate, 60 * 60 * 1000);
+      updateTimer = setInterval(checkExtensionUpdate, 5 * 60 * 1000);
     }
     const version = $('deployed-version');
     version.replaceChildren();

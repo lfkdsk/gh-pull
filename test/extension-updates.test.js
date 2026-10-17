@@ -23,7 +23,7 @@ test('development and prerelease builds make no network requests', async () => {
   }
 });
 
-test('concurrent tabs share requests and failures are cached for an hour', async () => {
+test('concurrent tabs share requests and failures are cached for five minutes', async () => {
   let time = 1, calls = 0, fail = false;
   const check = createUpdateCheck('v1.0.0', {
     now: () => time,
@@ -40,7 +40,7 @@ test('concurrent tabs share requests and failures are cached for an hour', async
   assert.equal(calls, 1);
   await check();
   assert.equal(calls, 1);
-  time += 3600000;
+  time += 300000;
   fail = true;
   assert.deepEqual(await check(), first);
   await check();
@@ -60,4 +60,23 @@ test('unavailable, malformed, draft and prerelease responses do not trigger noti
     assert.equal(await check(), null);
     assert.equal(calls, 1);
   }
+});
+
+test('a newly published release is detected after five minutes', async () => {
+  let time = 0, latest = 'v1.2.0', calls = 0;
+  const check = createUpdateCheck('v1.2.0', {
+    now: () => time,
+    fetchImpl: async () => {
+      calls++;
+      return { ok: true, json: async () => ({ tag_name: latest }) };
+    },
+  });
+  assert.equal(await check(), null);
+  latest = 'v1.3.0';
+  time = 299999;
+  assert.equal(await check(), null);
+  assert.equal(calls, 1);
+  time = 300000;
+  assert.equal((await check()).version, 'v1.3.0');
+  assert.equal(calls, 2);
 });
