@@ -3,7 +3,7 @@ import {
   history, historyKeymap, defaultKeymap,
   autocompletion, completionKeymap, acceptCompletion, closeCompletion,
 } from './vendor/codemirror.js';
-import { tokenizeQuery, queryCompletions, queryError } from './query.js';
+import { tokenizeQuery, queryCompletions, queryError, repositoryScope } from './query.js';
 
 function highlights(view) {
   const marks = [];
@@ -16,7 +16,34 @@ function highlights(view) {
   return Decoration.set(marks);
 }
 
-export function createQueryEditor({ parent, value, onChange, onSubmit, getItems }) {
+export function createQueryEditor({ parent, value, onChange, onSubmit, getItems, getRepositories }) {
+  const repositoryRequests = new Map();
+  let repositoryRevision = 0;
+  async function complete(context) {
+    const revision = repositoryRevision;
+    const query = context.state.doc.toString();
+    const result = queryCompletions(query, context.pos, getItems(), context.explicit);
+    const token = tokenizeQuery(query).find(t => t.from <= context.pos && t.to >= context.pos);
+    if (!result || token?.key !== 'repo' || context.pos <= token.from + token.raw.indexOf(':') || !getRepositories) return result;
+    context.addEventListener('abort', () => {}, { onDocChange: true });
+    try {
+      const scope = repositoryScope(query);
+      let cached = repositoryRequests.get(scope);
+      if (!cached || cached.until < Date.now()) {
+        const promise = getRepositories(scope);
+        cached = { promise, until: Date.now() + 5 * 60_000 };
+        repositoryRequests.set(scope, cached);
+        if (repositoryRequests.size > 20) repositoryRequests.delete(repositoryRequests.keys().next().value);
+        promise.catch(() => { if (repositoryRequests.get(scope) === cached) repositoryRequests.delete(scope); });
+      }
+      const data = await cached.promise;
+      if (context.aborted || revision !== repositoryRevision) return null;
+      const repositories = data.repositories.length ? data.repositories : getItems().map(pr => pr.repo);
+      return { ...result, options: [...new Set(repositories)].map(repo => ({ label: repo, type: 'text',
+        detail: data.limited ? 'Recent repositories (GitHub limit)' : data.source === 'me' ? 'Your repositories' : undefined,
+      })) };
+    } catch { return context.aborted || revision !== repositoryRevision ? null : result; }
+  }
   const editor = new EditorView({
     parent,
     state: EditorState.create({ doc: value, extensions: [
@@ -36,7 +63,7 @@ export function createQueryEditor({ parent, value, onChange, onSubmit, getItems 
         update(update) { if (update.docChanged) this.decorations = highlights(update.view); }
       }, { decorations: plugin => plugin.decorations }),
       autocompletion({
-        override: [context => queryCompletions(context.state.doc.toString(), context.pos, getItems(), context.explicit)],
+        override: [complete],
         activateOnTypingDelay: 80, interactionDelay: 0, defaultKeymap: false, icons: false,
         activateOnCompletion: completion => completion.label.endsWith(':'),
       }),
@@ -51,6 +78,7 @@ export function createQueryEditor({ parent, value, onChange, onSubmit, getItems 
     ] }),
   });
   return {
+    clearRepositoryCache() { repositoryRequests.clear(); repositoryRevision++; },
     get value() { return editor.state.doc.toString(); },
     setValue(next) {
       if (next !== editor.state.doc.toString()) editor.dispatch({ changes: { from: 0, to: editor.state.doc.length, insert: next } });

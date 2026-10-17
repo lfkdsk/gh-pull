@@ -310,3 +310,59 @@ test('PR-only restriction is hidden, enforced, and migrated from old query links
   assert.equal(await page.getByRole('option', { name: 'pr', exact: true }).count(), 0);
   assert.deepEqual(errors, []);
 });
+
+test('repository completion discovers other repositories independently of loaded results and caches by scope', async t => {
+  const requests = [];
+  const f = await fixture(t);
+  await f.page.route('**/api/repositories?*', async route => {
+    requests.push(new URL(route.request().url()).searchParams.get('q'));
+    await route.fulfill({ json: { repositories: ['example/dashboard', 'other/not-loaded'], limited: false, source: 'scope' } });
+  });
+  await f.open('is:open involves:@me repo:example/dashboard');
+  await f.editor.fill('is:open involves:@me repo:example/dashboard repo:');
+  await f.editor.press('Control+Space');
+  await f.page.getByRole('option', { name: /other\/not-loaded/ }).waitFor();
+  assert.deepEqual(requests, ['involves:@me']);
+  await f.editor.press('Escape');
+  await f.editor.fill('is:closed involves:@me repo:');
+  await f.editor.press('Control+Space');
+  await f.page.getByRole('option', { name: /other\/not-loaded/ }).waitFor();
+  assert.equal(requests.length, 1);
+  await f.editor.press('Escape');
+  await f.editor.fill('review-requested:bob repo:');
+  await f.editor.press('Control+Space');
+  await f.page.getByRole('option', { name: /other\/not-loaded/ }).waitFor();
+  assert.deepEqual(requests, ['involves:@me', 'review-requested:bob']);
+  assert.equal(f.calls.length, 1, 'Autocomplete must not submit the PR search');
+  assert.deepEqual(f.errors, []);
+});
+
+test('repository completion remains usable on lookup failure', async t => {
+  const f = await fixture(t);
+  await f.page.route('**/api/repositories?*', route => route.fulfill({ status: 503, json: { error: 'Offline' } }));
+  await f.open();
+  await f.editor.fill('repo:'); await f.editor.press('Control+Space');
+  await f.page.getByRole('option', { name: /example\/dashboard/ }).waitFor();
+  assert.deepEqual(f.errors, []);
+});
+
+test('late repository suggestions cannot replace a newer people scope', async t => {
+  const f = await fixture(t);
+  let release, started;
+  const ready = new Promise(resolve => { started = resolve; });
+  const held = new Promise(resolve => { release = resolve; });
+  t.after(() => release());
+  await f.page.route('**/api/repositories?*', async route => {
+    const scope = new URL(route.request().url()).searchParams.get('q');
+    if (scope === 'author:alice') { started(); await held; }
+    await route.fulfill({ json: { repositories: [scope === 'author:alice' ? 'alice/old-result' : 'bob/current-result'], limited: false, source: 'scope' } });
+  });
+  await f.open();
+  await f.editor.fill('author:alice repo:'); await f.editor.press('Control+Space'); await ready;
+  await f.editor.fill('author:bob repo:'); await f.editor.press('Control+Space');
+  await f.page.getByRole('option', { name: 'bob/current-result', exact: true }).waitFor();
+  release();
+  await f.page.waitForResponse(response => response.url().includes('/api/repositories?') && response.url().includes('alice'));
+  await f.editor.press('Tab');
+  assert.equal(await f.editor.innerText(), 'author:bob repo:bob/current-result');
+});

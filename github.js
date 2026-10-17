@@ -1,3 +1,4 @@
+import { repositoryScope } from './public/query.js';
 import { ApiError, createGraphQLClient } from './github-client.js';
 import { mergeOptions, normalizePullRequest, reviewState } from './pull-request.js';
 
@@ -154,6 +155,56 @@ export function createGitHub(options = {}) {
       items: await withDependencyParents(await withMergeAccess(connection.nodes.filter(pr => pr?.id).map(pr => normalizePullRequest(pr, data.viewer.login)))),
     };
   }
+
+  list.repositories = async query => {
+    const scope = repositoryScope(query);
+    async function discover(people) {
+      const repos = new Set();
+      let cursor = null, limited = false;
+      for (let page = 0; page < 10; page++) {
+        const data = await graphql(`query RepositorySuggestions($query: String!, $cursor: String) {
+          search(type: ISSUE, query: $query, first: 100, after: $cursor) {
+            issueCount pageInfo { hasNextPage endCursor }
+            nodes { ... on PullRequest { repository { nameWithOwner } } }
+          }
+        }`, { query: `is:pr ${people} sort:updated-desc`, cursor });
+        const connection = data.search;
+        for (const pr of connection.nodes ?? []) if (pr?.repository?.nameWithOwner) repos.add(pr.repository.nameWithOwner);
+        limited = connection.issueCount > 1000 || Boolean(connection.pageInfo.hasNextPage);
+        if (!connection.pageInfo.hasNextPage) break;
+        const next = connection.pageInfo.endCursor;
+        if (!next || next === cursor) break;
+        cursor = next;
+      }
+      return { repositories: [...repos].sort(), limited };
+    }
+    let result = await discover(scope), source = 'scope';
+    if (!result.repositories.length && scope !== 'involves:@me') {
+      result = await discover('involves:@me'); source = 'me';
+    }
+    if (!result.repositories.length) {
+      // New accounts may have repositories but no PR activity yet.
+      const repos = new Set();
+      let cursor = null;
+      for (let page = 0; page < 10; page++) {
+        const data = await graphql(`query ViewerRepositorySuggestions($cursor: String) {
+          viewer { repositories(first: 100, after: $cursor,
+            affiliations: [OWNER, COLLABORATOR, ORGANIZATION_MEMBER], orderBy: {field: UPDATED_AT, direction: DESC}) {
+              pageInfo { hasNextPage endCursor } nodes { nameWithOwner }
+          } }
+        }`, { cursor });
+        const connection = data.viewer.repositories;
+        for (const repo of connection.nodes ?? []) if (repo?.nameWithOwner) repos.add(repo.nameWithOwner);
+        result.limited = Boolean(connection.pageInfo.hasNextPage);
+        if (!connection.pageInfo.hasNextPage) break;
+        const next = connection.pageInfo.endCursor;
+        if (!next || next === cursor) break;
+        cursor = next;
+      }
+      result.repositories = [...repos].sort(); source = 'me';
+    }
+    return { ...result, source };
+  };
 
   // Fetch only active PRs between full searches, using their stable node IDs.
   list.status = async ids => {
