@@ -54,3 +54,7 @@ https://github.com/svgdotjs/svg.js
 
 MIT license and copyright notices are included in public/vendor/svg.LICENSE.txt,
 alongside the generated browser bundle.
+
+lit-html — BSD-3-Clause
+Copyright (c) 2017 Google LLC. All rights reserved.
+Vendored in public/vendor/lit-html.js. Full license: public/vendor/lit-html.LICENSE.txt.

@@ -28,7 +28,7 @@ async function fixture(t) {
   };
 }
 
-test('unchanged rows, focus and dependency canvas survive refresh; only changed rows rebuild', async t => {
+test('rows, focus and dependency canvas survive refresh and changed rows update in place', async t => {
   const f = await fixture(t), { page } = f;
   await page.evaluate(() => {
     window.savedRow = document.querySelector('[data-pr-id="pr-1"]');
@@ -121,4 +121,74 @@ test('fallback DOM moves preserve focus and selection without moveBefore', async
   await page.selectOption('#group', 'author');
   assert.equal(await page.evaluate(() => window.editor.isConnected), true);
   assert.deepEqual(await page.evaluate(() => [window.editor.value, window.editor.selectionStart, window.editor.selectionEnd]), ['Keep selection', 2, 7]);
+});
+
+
+test('a focused control and active editor survive changes to their own PR', async t => {
+  const f = await fixture(t), { page } = f;
+  await page.locator('[data-pr-id="pr-1"] .branch-copy').focus();
+  await page.evaluate(() => { window.control = document.activeElement; });
+  f.update('pr-1', { checks: 'SUCCESS', commentCount: 9 });
+  await page.clock.fastForward(15000); await f.idle();
+  assert.equal(await page.evaluate(() => document.activeElement === window.control), true);
+  assert.match(await page.locator('.pr-row[data-pr-id="pr-1"]').textContent(), /Checks passed/);
+  await page.locator('[data-pr-id="pr-1"] .edit-title').click();
+  await page.locator('.title-editor input').fill('Unsaved local title');
+  await page.evaluate(() => { window.editor = document.activeElement; window.editor.setSelectionRange(3, 9); });
+  f.update('pr-1', { title: 'Upstream title changed', checks: 'FAILURE', baseBranch: 'external-base' });
+  await page.clock.fastForward(15000); await f.idle();
+  assert.equal(await page.locator('[data-pr-id="pr-1"] .pr-title').textContent(), 'Upstream title changed');
+  assert.match(await page.locator('[data-pr-id="pr-1"] .dependency-chip').textContent(), /base not loaded/);
+  assert.deepEqual(await page.evaluate(() => [document.activeElement === window.editor, window.editor.value, window.editor.selectionStart, window.editor.selectionEnd]), [true, 'Unsaved local title', 3, 9]);
+  assert.deepEqual(f.errors, []);
+});
+
+test('open issue popover and its focused link survive updates to the owning PR', async t => {
+  const f = await fixture(t), { page } = f;
+  await page.locator('[data-pr-id="pr-1"] .issue-count').click();
+  await page.locator('.issue-link').focus();
+  await page.evaluate(() => { window.link = document.activeElement; window.trigger = document.querySelector('[data-pr-id="pr-1"] .issue-count'); });
+  f.update('pr-1', { checks: 'SUCCESS', closingIssues: [{ number: 10, title: 'Changed linked issue', state: 'CLOSED', repo: 'example/dashboard', url: 'https://github.com/example/dashboard/issues/10' }] });
+  await page.clock.fastForward(15000); await f.idle();
+  assert.equal(await page.locator('#closing-issues').evaluate(panel => panel.matches(':popover-open')), true);
+  assert.equal(await page.evaluate(() => document.activeElement === window.link && window.trigger === document.querySelector('[data-pr-id="pr-1"] .issue-count')), true);
+  assert.equal(await page.locator('.issue-title').textContent(), 'Changed linked issue');
+  assert.match(await page.locator('.issue-detail').textContent(), /Closed/);
+  assert.deepEqual(f.errors, []);
+});
+
+test('retained clipboard buttons copy the latest value once and restore their icon', async t => {
+  const f = await fixture(t), { page } = f;
+  await page.evaluate(() => {
+    window.copies = [];
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText: async text => { window.copies.push(text); } } });
+  });
+  const button = page.locator('[data-pr-id="pr-1"] .branch-copy');
+  await button.click();
+  await page.waitForFunction(() => document.querySelector('[data-pr-id="pr-1"] .copy-symbol').textContent === '✓' || window.copies.length === 1);
+  f.update('pr-1', { branch: 'feature/new-name', commentCount: 7 });
+  await f.refresh();
+  await f.refresh();
+  await button.click();
+  assert.deepEqual(await page.evaluate(() => window.copies), ['feature/1', 'feature/new-name']);
+  await page.clock.fastForward(2000);
+  assert.equal(await button.getAttribute('title'), 'Copy branch name: feature/new-name');
+  assert.equal(await button.locator('.copy-symbol svg').count(), 1);
+  assert.deepEqual(f.errors, []);
+});
+
+test('typing a title updates its row without rendering the dashboard', async t => {
+  const f = await fixture(t), { page } = f;
+  await page.locator('[data-pr-id="pr-1"] .edit-title').click();
+  await page.evaluate(() => {
+    window.dashboardRenders = 0;
+    window.observer = new MutationObserver(records => { window.dashboardRenders += records.filter(r => r.attributeName === 'aria-busy').length; });
+    window.observer.observe(document.querySelector('#results'), { attributes: true });
+  });
+  await page.locator('.title-editor input').pressSequentially(' edited');
+  assert.equal(await page.locator('.title-editor button[type="submit"]').isEnabled(), true);
+  assert.equal(await page.evaluate(() => window.dashboardRenders), 0);
+  await page.locator('.title-editor input').fill('');
+  assert.equal(await page.locator('.title-editor button[type="submit"]').isEnabled(), false);
+  assert.deepEqual(f.errors, []);
 });
