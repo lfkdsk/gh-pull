@@ -19,12 +19,13 @@ function highlights(view) {
 export function createQueryEditor({ parent, value, onChange, onSubmit, getItems, getRepositories }) {
   const repositoryRequests = new Map();
   let repositoryRevision = 0;
-  async function complete(context) {
+  const localCompletions = context => queryCompletions(context.state.doc.toString(), context.pos, getItems(), context.explicit);
+  async function repositoryCompletions(context) {
     const revision = repositoryRevision;
     const query = context.state.doc.toString();
     const result = queryCompletions(query, context.pos, getItems(), context.explicit);
     const token = tokenizeQuery(query).find(t => t.from <= context.pos && t.to >= context.pos);
-    if (!result || token?.key !== 'repo' || context.pos <= token.from + token.raw.indexOf(':') || !getRepositories) return result;
+    if (!result || token?.key !== 'repo' || context.pos <= token.from + token.raw.indexOf(':') || !getRepositories) return null;
     context.addEventListener('abort', () => {}, { onDocChange: true });
     try {
       const scope = repositoryScope(query);
@@ -38,11 +39,13 @@ export function createQueryEditor({ parent, value, onChange, onSubmit, getItems,
       }
       const data = await cached.promise;
       if (context.aborted || revision !== repositoryRevision) return null;
-      const repositories = data.repositories.length ? data.repositories : getItems().map(pr => pr.repo);
-      return { ...result, options: [...new Set(repositories)].map(repo => ({ label: repo, type: 'text',
-        detail: data.limited ? 'Recent repositories (GitHub limit)' : data.source === 'me' ? 'Your repositories' : undefined,
+      // CodeMirror combines both sources. Local results are visible while this
+      // request is pending; remote results only add repositories not already shown.
+      const loaded = new Set(result.options.map(option => option.label));
+      return { ...result, options: [...new Set(data.repositories)].filter(repo => !loaded.has(repo)).map(repo => ({ label: repo, type: 'text',
+        detail: data.limited ? 'Recent repositories (partial list)' : data.source === 'me' ? 'Your repositories' : undefined,
       })) };
-    } catch { return context.aborted || revision !== repositoryRevision ? null : result; }
+    } catch { return null; /* Local suggestions remain available. */ }
   }
   const editor = new EditorView({
     parent,
@@ -63,7 +66,8 @@ export function createQueryEditor({ parent, value, onChange, onSubmit, getItems,
         update(update) { if (update.docChanged) this.decorations = highlights(update.view); }
       }, { decorations: plugin => plugin.decorations }),
       autocompletion({
-        override: [complete],
+        override: [localCompletions, repositoryCompletions],
+        updateSyncTime: 0,
         activateOnTypingDelay: 80, interactionDelay: 0, defaultKeymap: false, icons: false,
         activateOnCompletion: completion => completion.label.endsWith(':'),
       }),

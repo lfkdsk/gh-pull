@@ -366,3 +366,29 @@ test('late repository suggestions cannot replace a newer people scope', async t 
   await f.editor.press('Tab');
   assert.equal(await f.editor.innerText(), 'author:bob repo:bob/current-result');
 });
+
+test('loaded repositories appear before slow discovery and remain alongside remote suggestions', async t => {
+  const f = await fixture(t);
+  let release;
+  const held = new Promise(resolve => { release = resolve; });
+  t.after(() => release());
+  await f.page.route('**/api/repositories?*', async route => {
+    await held;
+    await route.fulfill({ json: { repositories: ['other/not-loaded'], limited: true, source: 'scope' } });
+  });
+  // No people filter: the remote lookup defaults to @me, but the on-screen
+  // repository must still be suggested even when it isn't in that lookup.
+  await f.open('is:open repo:example/dashboard');
+  await f.editor.fill('is:open repo:example/dashboard repo:');
+  await f.editor.press('Control+Space');
+  await f.page.getByRole('option', { name: 'example/dashboard', exact: true }).waitFor();
+  assert.equal(await f.page.getByRole('option', { name: /other\/not-loaded/ }).count(), 0);
+  release();
+  await f.page.getByRole('option', { name: /other\/not-loaded/ }).waitFor();
+  assert.equal(await f.page.getByRole('option', { name: 'example/dashboard', exact: true }).count(), 1);
+  assert.match(await f.page.getByRole('option', { name: /other\/not-loaded/ }).textContent(), /partial list/);
+  await f.page.getByRole('option', { name: 'example/dashboard', exact: true }).click();
+  assert.equal(await f.editor.innerText(), 'is:open repo:example/dashboard repo:example/dashboard');
+  assert.equal(f.calls.length, 1);
+  assert.deepEqual(f.errors, []);
+});
