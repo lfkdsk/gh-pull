@@ -150,3 +150,14 @@ export function queryCompletions(query, position, items = [], explicit = false) 
   const valueFrom = from + qualifier[1].length + qualifier[2].length + 1;
   return { from: valueFrom, to, options: [...new Set(options.filter(Boolean))].map(value => ({ label: quoteValue(value), type: 'text' })) };
 }
+
+// Repository discovery follows people, not the currently narrowed result set.
+// Incomplete qualifiers are expected while editing and are ignored here.
+export function repositoryScope(query) {
+  if (typeof query !== 'string' || query.length > MAX_QUERY_LENGTH || /[\x00-\x1f\x7f]/.test(query)) throw new Error('Invalid autocomplete query.');
+  const scopes = tokenizeQuery(query).filter(t => userKeys.includes(t.key) &&
+    /^(?:@me|[a-z\d][a-z\d-]*(?:\/[a-z\d][a-z\d-]*)?)$/i.test(t.value ?? ''));
+  const terms = scopes.map(t => `${t.negative ? '-' : ''}${t.key}:${t.value}`);
+  if (!scopes.some(t => !t.negative)) terms.push('involves:@me');
+  return [...new Set(terms)].sort().join(' ');
+}

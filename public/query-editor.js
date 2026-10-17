@@ -3,7 +3,7 @@ import {
   history, historyKeymap, defaultKeymap,
   autocompletion, completionKeymap, acceptCompletion, closeCompletion,
 } from './vendor/codemirror.js';
-import { tokenizeQuery, queryCompletions, queryError } from './query.js';
+import { tokenizeQuery, queryCompletions, queryError, repositoryScope } from './query.js';
 
 function highlights(view) {
   const marks = [];
@@ -16,7 +16,37 @@ function highlights(view) {
   return Decoration.set(marks);
 }
 
-export function createQueryEditor({ parent, value, onChange, onSubmit, getItems }) {
+export function createQueryEditor({ parent, value, onChange, onSubmit, getItems, getRepositories }) {
+  const repositoryRequests = new Map();
+  let repositoryRevision = 0;
+  const localCompletions = context => queryCompletions(context.state.doc.toString(), context.pos, getItems(), context.explicit);
+  async function repositoryCompletions(context) {
+    const revision = repositoryRevision;
+    const query = context.state.doc.toString();
+    const result = queryCompletions(query, context.pos, getItems(), context.explicit);
+    const token = tokenizeQuery(query).find(t => t.from <= context.pos && t.to >= context.pos);
+    if (!result || token?.key !== 'repo' || context.pos <= token.from + token.raw.indexOf(':') || !getRepositories) return null;
+    context.addEventListener('abort', () => {}, { onDocChange: true });
+    try {
+      const scope = repositoryScope(query);
+      let cached = repositoryRequests.get(scope);
+      if (!cached || cached.until < Date.now()) {
+        const promise = getRepositories(scope);
+        cached = { promise, until: Date.now() + 5 * 60_000 };
+        repositoryRequests.set(scope, cached);
+        if (repositoryRequests.size > 20) repositoryRequests.delete(repositoryRequests.keys().next().value);
+        promise.catch(() => { if (repositoryRequests.get(scope) === cached) repositoryRequests.delete(scope); });
+      }
+      const data = await cached.promise;
+      if (context.aborted || revision !== repositoryRevision) return null;
+      // CodeMirror combines both sources. Local results are visible while this
+      // request is pending; remote results only add repositories not already shown.
+      const loaded = new Set(result.options.map(option => option.label));
+      return { ...result, options: [...new Set(data.repositories)].filter(repo => !loaded.has(repo)).map(repo => ({ label: repo, type: 'text',
+        detail: data.limited ? 'Recent repositories (partial list)' : data.source === 'me' ? 'Your repositories' : undefined,
+      })) };
+    } catch { return null; /* Local suggestions remain available. */ }
+  }
   const editor = new EditorView({
     parent,
     state: EditorState.create({ doc: value, extensions: [
@@ -36,7 +66,8 @@ export function createQueryEditor({ parent, value, onChange, onSubmit, getItems 
         update(update) { if (update.docChanged) this.decorations = highlights(update.view); }
       }, { decorations: plugin => plugin.decorations }),
       autocompletion({
-        override: [context => queryCompletions(context.state.doc.toString(), context.pos, getItems(), context.explicit)],
+        override: [localCompletions, repositoryCompletions],
+        updateSyncTime: 0,
         activateOnTypingDelay: 80, interactionDelay: 0, defaultKeymap: false, icons: false,
         activateOnCompletion: completion => completion.label.endsWith(':'),
       }),
@@ -51,6 +82,7 @@ export function createQueryEditor({ parent, value, onChange, onSubmit, getItems 
     ] }),
   });
   return {
+    clearRepositoryCache() { repositoryRequests.clear(); repositoryRevision++; },
     get value() { return editor.state.doc.toString(); },
     setValue(next) {
       if (next !== editor.state.doc.toString()) editor.dispatch({ changes: { from: 0, to: editor.state.doc.length, insert: next } });

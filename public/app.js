@@ -445,6 +445,7 @@ async function load({ append = false, refresh = false, background = false } = {}
     data.items = fetchedItems;
     if (!loads.isCurrent(request)) return;
     if (viewedStore.selectAccount(data.viewer)) {
+      queryEditor?.clearRepositoryCache();
       issuePopover.close();
       mergedStore.clear();
       titleEdits.clear();
@@ -511,6 +512,12 @@ async function initializeQueryEditor() {
   const { createQueryEditor } = await import('./query-editor.js');
   queryEditor = createQueryEditor({
     parent: $('query-editor'), value: appliedQuery, getItems: () => items,
+    getRepositories: async scope => {
+      const response = await apiFetch(`/api/repositories?${new URLSearchParams({ q: scope })}`, { signal: AbortSignal.timeout(35_000) });
+      const data = await response.json();
+      if (!response.ok) throw responseError(response, data, 'Could not load repository suggestions.');
+      return data;
+    },
     onChange: updateQueryControls, onSubmit: applyQuery,
   });
   updateQueryControls();

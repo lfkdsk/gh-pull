@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
 import { randomBytes } from 'node:crypto';
-import { toGitHubQuery } from './public/query.js';
+import { toGitHubQuery, repositoryScope } from './public/query.js';
 import { createGitHub, ApiError, validateTitleUpdate, validateDraftUpdate, validateMerge } from './github.js';
 import { cachedRequest } from './request-cache.js';
 import { authConfig, createAuth } from './auth.js';
@@ -135,6 +135,14 @@ export function createApp({ list = createGitHub(), updateTitle = list.updateTitl
         });
         return;
       }
+      if (url.pathname === '/api/repositories') {
+        let scope;
+        try { scope = repositoryScope(url.searchParams.get('q') ?? ''); }
+        catch (error) { return send(400, { error: error.message }); }
+        if (!activeList.repositories) return send(200, { repositories: [], limited: false });
+        return send(200, await cachedRequest(cache, JSON.stringify(['repositories', scope]),
+          () => activeList.repositories(scope), { ttl: 5 * 60_000 }));
+      }
       if (['/api/pulls/readiness', '/api/pulls/status'].includes(url.pathname)) {
         const ids = url.searchParams.getAll('id');
         if (!ids.length || ids.length > 50 || ids.some(id => !id.trim() || id.length > 200)) return send(400, { error: 'Provide 1–50 valid PR IDs.' });
@@ -146,7 +154,7 @@ export function createApp({ list = createGitHub(), updateTitle = list.updateTitl
           // A node refresh can reveal changes before search's cached page expires.
           // Reconcile query membership through a fresh search on the next list read.
           if (kind === 'status') for (const cachedKey of cache.keys()) {
-            if (!['status', 'mergeReadiness'].includes(JSON.parse(cachedKey)[0])) cache.delete(cachedKey);
+            if (!['status', 'mergeReadiness', 'repositories'].includes(JSON.parse(cachedKey)[0])) cache.delete(cachedKey);
           }
           return result;
         }, { ttl: kind === 'status' ? 10_000 : 1000 }));
